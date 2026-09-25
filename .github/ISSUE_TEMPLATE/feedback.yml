@@ -1,0 +1,38 @@
+name: Feedback or language request
+description: Share an idea, general feedback, or request another app language.
+title: "[Feedback]: "
+body:
+  - type: dropdown
+    id: feedback-type
+    attributes:
+      label: What would you like to share?
+      options:
+        - General feedback
+        - Feature idea
+        - Language request
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Tell us about it
+      description: Share as much or as little detail as you like.
+      placeholder: What would you like us to know?
+    validations:
+      required: true
+  - type: input
+    id: language
+    attributes:
+      label: Language requested (if applicable)
+      description: Spanish is the first planned translation. Other languages may be considered based on community interest.
+      placeholder: e.g. Spanish, French, Portuguese
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: For language requests, you can also mention if you may be able to help review a translation.
+    validations:
+      required: false

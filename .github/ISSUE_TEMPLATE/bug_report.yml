@@ -1,0 +1,47 @@
+name: Bug report
+description: Report something that is not working as expected.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Please do not include passwords, account details, or other private information. Diagnostics are optional; review them before attaching."
+  - type: input
+    id: app-version
+    attributes:
+      label: Frame Trace version
+      description: The version shown in the app window.
+      placeholder: "0.7.10"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What went wrong?
+      description: Tell us what happened and what you expected to happen.
+      placeholder: Describe the problem in your own words.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How can we reproduce it?
+      description: List the steps that caused the problem, if you know them.
+      placeholder: "1. Open...\n2. Change...\n3. See..."
+    validations:
+      required: false
+  - type: textarea
+    id: setup
+    attributes:
+      label: Your setup
+      description: Include Windows version, GPU and driver, game, and display mode when relevant.
+      placeholder: Windows version; GPU and driver; game; windowed, borderless, or fullscreen
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: Other details
+      description: Add screenshots or other details that may help.
+    validations:
+      required: false

@@ -70,4 +70,14 @@ The build creates a self-contained Windows x64 application and per-user installe
 
 ## Source and contributions
 
-Frame Trace's source code is licensed under [MIT](LICENSE). Third-party components keep their own licenses; see `vendor/` notices and the packaged `ThirdPartyNotices.txt`. Bug reports and contributions are welcome. Include your Windows version, GPU and driver, game and display mode, and a reviewed diagnostics file only when it is safe to share.
+Frame Trace's source code is licensed under [MIT](LICENSE). Third-party components keep their own licenses; see `vendor/` notices and the packaged `ThirdPartyNotices.txt`.
+
+### Feedback and bug reports
+
+Have an idea, question, or problem to report? [Open a GitHub issue](https://github.com/itourboy-OG/FrameTrace/issues/new/choose) and choose **Bug report** for something that is not working, or **Feedback or language request** for ideas, general feedback, and language requests. Fill in the form and submit it; you do not need to know Git or write code. If you are unsure which option fits, use the feedback form. If someone has already reported the same thing, add a comment to that issue instead.
+
+Issues are public. Do not include passwords, account details, or other private information. A diagnostics file is optional; review it first because it can contain hardware readings, process names, and recent frame data. See [Settings and privacy](#settings-and-privacy) for details.
+
+More app languages may be added based on community interest. **Spanish is the first planned translation.** Use the feedback form to request another language or offer help with a translation.
+
+Pull requests are welcome from people who want to propose code changes, but they are not required to report a problem or share feedback.
