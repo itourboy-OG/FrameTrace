@@ -1,0 +1,128 @@
+<Window x:Class="Frameglass.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Frameglass" Title="Frame Trace" Icon="Assets/FrameTrace.ico" Style="{StaticResource {x:Type Window}}" Width="1280" Height="940" MinWidth="1050" MinHeight="760" WindowStartupLocation="CenterScreen">
+ <Grid>
+  <local:GamingBackground x:Name="AnimatedBackground" IsHitTestVisible="False"/>
+  <Grid Margin="28">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <Grid Margin="0,0,0,22"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <StackPanel><StackPanel Orientation="Horizontal"><Image Source="Assets/FrameTrace.png" Width="38" Height="38" Margin="0,0,12,0"/><TextBlock Text="FRAME TRACE" FontFamily="Segoe UI Semibold" FontSize="27" VerticalAlignment="Center"/><TextBlock x:Name="AppVersion" Foreground="#9EAABC" FontSize="12" VerticalAlignment="Bottom" Margin="10,0,0,5"/></StackPanel><TextBlock Text="Open your game. Your performance follows." Foreground="#9EAABC" Margin="0,7,0,0"/></StackPanel>
+   <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><TextBlock x:Name="HardwareStatus" Text="Connecting sensors…" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" Margin="0,0,20,0"/><Button x:Name="OverlayButton" Content="Overlay on" AutomationProperties.AutomationId="OverlayButton" Click="ToggleOverlay" Background="{DynamicResource Accent}" Foreground="#10221C"/></StackPanel>
+  </Grid>
+  <Border x:Name="UpdateBanner" Grid.Row="1" Visibility="Collapsed" Background="#20392F" BorderBrush="#83EFCD" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,12">
+   <DockPanel LastChildFill="True"><Button DockPanel.Dock="Right" Content="View update" Click="OpenUpdatePage" Margin="10,0,0,0"/><Button DockPanel.Dock="Right" Content="×" ToolTip="Dismiss update notice" Click="DismissUpdateBanner" Padding="9,3"/><TextBlock x:Name="UpdateBannerText" Text="A new Frame Trace update is available." VerticalAlignment="Center" TextWrapping="Wrap"/></DockPanel>
+  </Border>
+  <TabControl x:Name="Pages" Grid.Row="2" Background="Transparent" BorderThickness="0" Foreground="#F1F4F8" Padding="0,18,0,0" SelectionChanged="PageChanged">
+
+   <TabControl.Resources><Style TargetType="TabItem"><Setter Property="Foreground" Value="#F1F4F8"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem"><Border x:Name="TabSurface" CornerRadius="7" Padding="22,11" Margin="0,0,8,0" Background="#1B222D"><ContentPresenter ContentSource="Header"/></Border><ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="TabSurface" Property="Background" Value="#305046"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style></TabControl.Resources>
+
+   <TabItem Header="Dashboard" AutomationProperties.AutomationId="DashboardTab">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+
+     <Border Style="{StaticResource Card}" Margin="0,0,0,16"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="1.2*"/><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="GAME CAPTURE" Foreground="{DynamicResource Accent}" FontSize="12"/><TextBlock x:Name="GameName" Text="Waiting for your game" FontSize="24" FontWeight="SemiBold" Margin="0,8,0,5"/><TextBlock x:Name="CaptureState" Text="Capture starts automatically. No executable filename or Start button needed." Foreground="#AEBED1" TextWrapping="Wrap"/></StackPanel><StackPanel Grid.Column="2" VerticalAlignment="Center"><TextBlock Text="Capture target" Margin="0,0,0,5" Foreground="#AEBED1"/><ComboBox Style="{StaticResource CaptureTargetStyle}" x:Name="CaptureTargetSelector" AutomationProperties.AutomationId="CaptureTargetSelector" HorizontalAlignment="Stretch" MinWidth="240" MaxDropDownHeight="320" DropDownOpened="OpenCaptureTargets" SelectionChanged="ChangeCaptureTarget"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" ToolTip="{Binding Label}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"/></DataTemplate></ComboBox.ItemTemplate></ComboBox><DockPanel Margin="0,8,0,0"><Button x:Name="RetryButton" Content="Restart capture" AutomationProperties.AutomationId="RetryCapture" Click="RetryCapture" HorizontalAlignment="Left"/><TextBlock Text="Automatic follows the foreground game. Select a running game if detection misses it." FontSize="12" Foreground="#AEBED1" TextWrapping="Wrap" Margin="12,0,0,0" VerticalAlignment="Center"/></DockPanel></StackPanel></Grid></Border>
+
+     <Border Style="{StaticResource Card}" Margin="0,0,0,16"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><StackPanel Margin="0,0,14,0"><TextBlock Text="APP / PRESENT FPS" Style="{StaticResource Muted}"/><TextBlock x:Name="AppFps" Text="—" FontSize="42" Foreground="{DynamicResource Accent}" FontWeight="SemiBold"/></StackPanel><Rectangle Grid.Column="1" Grid.RowSpan="2" Fill="#34404D"/><StackPanel Grid.Column="2" Margin="18,0,14,0"><TextBlock Text="OBSERVED DISPLAY FPS" Style="{StaticResource Muted}"/><TextBlock x:Name="DisplayFps" Text="—" FontSize="42" FontWeight="SemiBold"/><TextBlock x:Name="GenerationText" ToolTip="This capture source tags AFMF and XeSS-FG. It does not identify driver versions, DLSS, or in-game FSR frame generation." Text="Frame generation · unavailable" Style="{StaticResource Muted}"/></StackPanel><Rectangle Grid.Column="3" Grid.RowSpan="2" Fill="#34404D"/><StackPanel Grid.Column="4" Margin="18,0,14,0"><TextBlock Text="AVERAGE FPS" Style="{StaticResource Muted}"/><TextBlock x:Name="AverageFps" Text="—" FontSize="38" FontWeight="SemiBold" Foreground="#DDE4EF"/><TextBlock Text="Rolling 30-second average" Style="{StaticResource Muted}"/></StackPanel><Rectangle Grid.Column="5" Grid.RowSpan="2" Fill="#34404D"/><StackPanel Grid.Column="6" Margin="18,0,0,0"><TextBlock Text="1% LOW FPS" Style="{StaticResource Muted}"/><TextBlock x:Name="LowFps" Text="—" FontSize="38" FontWeight="SemiBold" Foreground="#DDE4EF"/><TextBlock Text="Needs 100 frame samples" Style="{StaticResource Muted}"/></StackPanel><TextBlock x:Name="FrameTimeText" Grid.Row="1" Grid.ColumnSpan="7" Text="Waiting for game frames" Style="{StaticResource Muted}" Margin="0,8,0,0" VerticalAlignment="Bottom"/></Grid></Border>
+
+     <Border Style="{StaticResource Card}" Margin="0,0,0,16"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="300"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="FRAME TIME" Style="{StaticResource Muted}"/><local:FrameGraph x:Name="Chart" Height="110" Margin="0,10,20,0"/><TextBlock x:Name="ChartScale" Text="Actual frame times · 2 s playback delay for event delivery" Style="{StaticResource Muted}" TextWrapping="Wrap"/></StackPanel><StackPanel Grid.Column="1"><TextBlock x:Name="PresentMode" Text="No active game"/><TextBlock Text="Upscaler detection is not supported yet" ToolTip="Windows presentation events do not report the active upscaler or quality preset. OptiScaler input and output can be different." Style="{StaticResource Muted}" Margin="0,10,0,8"/><TextBlock Text="App FPS can include injected frames. Generated-frame coverage depends on the game and driver." Style="{StaticResource Muted}" TextWrapping="Wrap"/></StackPanel></Grid></Border>
+
+     <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="16"/><ColumnDefinition/><ColumnDefinition Width="16"/><ColumnDefinition/></Grid.ColumnDefinitions>
+
+      <Border Style="{StaticResource Card}"><StackPanel><TextBlock Text="GPU" Foreground="#FF8888" FontWeight="Bold"/><TextBlock x:Name="GpuName" Margin="0,8,0,16"/><TextBlock x:Name="GpuStats" LineHeight="24"/></StackPanel></Border>
+
+      <Border Grid.Column="2" Style="{StaticResource Card}"><StackPanel><TextBlock Text="CPU" Foreground="#FFBA77" FontWeight="Bold"/><TextBlock x:Name="CpuName" Margin="0,8,0,16"/><TextBlock x:Name="CpuStats" LineHeight="24"/><Expander Header="Usage by CPU thread" Foreground="#DDE4EF" Margin="0,10,0,0"><ItemsControl x:Name="CpuCoreList" Margin="0,8,0,0"><ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" FontSize="12" Margin="0,3"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Expander><TextBlock x:Name="SensorAvailability" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,14,0,0"/></StackPanel></Border>
+
+      <Border Grid.Column="4" Style="{StaticResource Card}"><StackPanel><TextBlock Text="RAM" Foreground="#80BDFF" FontWeight="Bold"/><TextBlock Text="Physical memory used" Style="{StaticResource Muted}" Margin="0,22,0,8"/><TextBlock x:Name="MemoryStats" FontSize="42" FontWeight="SemiBold" Foreground="#80BDFF"/></StackPanel></Border>
+
+     </Grid>
+
+    </StackPanel></ScrollViewer>
+
+   </TabItem>
+
+   <TabItem Header="Overlay studio" AutomationProperties.AutomationId="StudioTab">
+
+    <ScrollViewer x:Name="StudioWorkspaceScroll" VerticalScrollBarVisibility="Auto"><Grid Height="{Binding ViewportHeight, ElementName=StudioWorkspaceScroll}" MinHeight="680"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="22"/><ColumnDefinition Width="330"/></Grid.ColumnDefinitions>
+
+     <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions><StackPanel><TextBlock Text="Your overlay. Your layout." FontSize="23" FontWeight="SemiBold"/><TextBlock Text="Select items to move them together, or add individual metrics. Edit the selected item on the right." Foreground="#AEBED1" Margin="0,8,0,14"/>
+
+      <WrapPanel Margin="0,0,0,10"><ComboBox Style="{StaticResource CaptureTargetStyle}" x:Name="DisplaySelector" Width="300" SelectionChanged="SelectDisplay" AutomationProperties.AutomationId="DisplaySelector"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis"/></DataTemplate></ComboBox.ItemTemplate></ComboBox><CheckBox x:Name="FollowDisplay" Content="Follow game display (canvas and overlay)" IsChecked="True" Margin="12,6,0,0"/></WrapPanel>
+
+      <WrapPanel Margin="0,0,0,10"><ComboBox Style="{StaticResource CaptureTargetStyle}" x:Name="PresetSelector" Width="175" AutomationProperties.AutomationId="PresetSelector"/><Button x:Name="ApplyPresetButton" AutomationProperties.AutomationId="ApplyPreset" Content="Use preset" Click="ApplyPreset" Margin="8,0"/><Button Content="Fit" Click="FitStudio"/><Button Content="100%" Click="ActualStudio" Margin="8,0"/><TextBlock x:Name="ZoomLabel" VerticalAlignment="Center"/><Slider x:Name="ZoomSlider" Minimum="10" Maximum="400" Width="110" ValueChanged="ChangeZoom" AutomationProperties.AutomationId="StudioZoom" Margin="8,0"/></WrapPanel>
+
+      <WrapPanel Margin="0,0,0,8"><ComboBox Style="{StaticResource CaptureTargetStyle}" x:Name="CustomPresetSelector" Width="220" MinWidth="220" MaxDropDownHeight="320" AutomationProperties.AutomationId="CustomPresetSelector"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}"/></DataTemplate></ComboBox.ItemTemplate></ComboBox><Button x:Name="LoadCustomPresetButton" Content="Use saved preset" Click="LoadCustomPreset" Margin="6,0" AutomationProperties.AutomationId="LoadCustomPreset"/><TextBox x:Name="CustomPresetName" Width="170" ToolTip="Name for your custom preset" MaxLength="60" AutomationProperties.AutomationId="CustomPresetName"/><Button Content="Save preset" Click="SaveCustomPreset" Margin="6,0" AutomationProperties.AutomationId="SaveCustomPreset"/></WrapPanel>
+      <WrapPanel Margin="0,0,0,8"><Button Content="Select all" Click="SelectAllOverlay" AutomationProperties.AutomationId="SelectAllOverlay"/><CheckBox x:Name="EditorGrid" Content="Grid" IsChecked="True" Click="ChangeEditorGrid" Margin="12,6"/><CheckBox x:Name="EditorSnap" Content="Snap" IsChecked="True" Click="ChangeEditorGrid" Margin="0,6"/><TextBlock Text="Drag empty space to select · Shift-click to add · Ctrl-drag moves freely" Foreground="#AEBED1" VerticalAlignment="Center" Margin="12,0"/></WrapPanel>
+     </StackPanel>
+      <Border Grid.Row="1" BorderBrush="#405064" BorderThickness="1" CornerRadius="8" Padding="4" Background="#17202B"><ScrollViewer x:Name="PreviewViewport" MinHeight="80" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" PreviewMouseWheel="StudioWheel" PreviewMouseDown="StartPan" PreviewMouseMove="PanStudio" PreviewMouseUp="EndPan" SizeChanged="ViewportResized" AutomationProperties.AutomationId="LayoutPreview"/></Border>
+
+     <StackPanel Grid.Row="2">
+      <TextBlock x:Name="CanvasDescription" Text="Detecting display…" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,12,0,16"/>
+
+      <WrapPanel><Button x:Name="TestOverlayButton" Content="Test overlay" Click="ToggleOverlayTest" AutomationProperties.AutomationId="TestOverlay" Margin="0,0,10,0"/><Button Content="Save &amp; apply" Click="SaveSettings" AutomationProperties.AutomationId="SaveStudio" Background="{DynamicResource Accent}" Foreground="#10221C"/><Button Content="Export layout" Click="ExportLayout" Margin="10,0,0,0"/><Button Content="Import layout" Click="ImportLayout" Margin="10,0,0,0"/></WrapPanel>
+
+      <TextBlock x:Name="StudioStatus" Foreground="#AEBED1" TextWrapping="Wrap" Margin="0,14,0,0"/>
+
+     </StackPanel></Grid>
+
+     <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto"><StackPanel>
+
+      <TextBlock Text="OVERLAY ITEM" Style="{StaticResource Muted}"/><ComboBox Style="{StaticResource CaptureTargetStyle}" x:Name="SectionSelector" SelectionChanged="SelectSection" AutomationProperties.AutomationId="SectionSelector" Margin="0,7,0,12"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding EditorLabel}" TextTrimming="CharacterEllipsis"/></DataTemplate></ComboBox.ItemTemplate></ComboBox><ComboBox Style="{StaticResource CaptureTargetStyle}" x:Name="AddMetricSelector" AutomationProperties.AutomationId="AddMetricSelector"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis"/></DataTemplate></ComboBox.ItemTemplate></ComboBox><WrapPanel Margin="0,6,0,12"><Button x:Name="AddSeparateMetricButton" Content="Add separate metric" Click="AddSeparateMetric" AutomationProperties.AutomationId="AddSeparateMetric"/><Button x:Name="RemoveOverlayItemButton" Content="Remove item" Click="RemoveOverlayItem" Margin="6,0" AutomationProperties.AutomationId="RemoveOverlayItem"/></WrapPanel>
+
+      <CheckBox x:Name="ShowSectionName" Content="Show section title" Click="EditSection"/><CheckBox x:Name="HorizontalSection" Content="Put metrics on one line" Click="EditSection"/><CheckBox x:Name="SectionVisible" Content="Show this section" Click="EditSection" AutomationProperties.AutomationId="SectionVisible"/>
+
+      <TextBlock Text="Display name" Style="{StaticResource Muted}" Margin="0,12,0,5"/><TextBox x:Name="SectionName" MaxLength="80" TextChanged="EditSection" AutomationProperties.AutomationId="SectionName"/><TextBlock Text="Leave empty to use the detected hardware name." Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,10"/>
+
+      <WrapPanel><Button x:Name="NameColor" Content="Name color" Click="PickNameColor" AutomationProperties.AutomationId="NameColor"/><Button x:Name="ValueColor" Content="Value color" Click="PickValueColor" AutomationProperties.AutomationId="ValueColor" Margin="8,0,0,0"/></WrapPanel>
+
+      <TextBlock Text="Name size" Style="{StaticResource Muted}" Margin="0,18,0,6"/><Slider x:Name="NameSize" Minimum="10" Maximum="48" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="EditSection" AutomationProperties.AutomationId="NameSize"/>
+
+      <CheckBox x:Name="IndependentLabelSize" Content="Independent label size" Click="EditSection"/><Slider x:Name="LabelSize" Minimum="8" Maximum="96" Value="16" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="EditSection" AutomationProperties.AutomationId="LabelSize"/>
+      <TextBlock Text="Value size" Style="{StaticResource Muted}" Margin="0,14,0,6"/><Slider x:Name="ValueSize" Minimum="10" Maximum="64" TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="EditSection" AutomationProperties.AutomationId="ValueSize"/>
+
+      <TextBlock Text="Metric layout" Style="{StaticResource Muted}" Margin="0,14,0,5"/><ComboBox Style="{StaticResource CaptureTargetStyle}" x:Name="MetricLayoutSelector" SelectedIndex="0" SelectionChanged="EditSection" AutomationProperties.AutomationId="MetricLayout"><ComboBoxItem Content="Flow · inline readings"/><ComboBoxItem Content="Table · aligned label/value columns"/><ComboBoxItem Content="Tiles · label above value"/></ComboBox>
+      <TextBlock Text="Section padding" Style="{StaticResource Muted}" Margin="0,12,0,5"/><Slider x:Name="SectionPadding" Minimum="0" Maximum="24" ValueChanged="EditSection"/>
+      <CheckBox x:Name="TextShadow" Content="Dark text shadow for readability" Click="EditSection"/>
+      <StackPanel x:Name="GraphOptions"><TextBlock Text="FPS emphasis size · 0 uses value size" Style="{StaticResource Muted}" Margin="0,12,0,5"/><Slider x:Name="HeroSize" Minimum="0" Maximum="96" ValueChanged="EditSection"/><CheckBox x:Name="GraphBelow" Content="Place graph below readings" Click="EditSection"/><CheckBox x:Name="ShowGraph" Content="Show frame-time graph" Click="EditSection"/><TextBlock Text="Graph width / height" Style="{StaticResource Muted}" Margin="0,8"/><Slider x:Name="GraphWidth" Minimum="120" Maximum="1200" Value="320" ValueChanged="EditSection"/><Slider x:Name="GraphHeight" Minimum="40" Maximum="400" Value="90" ValueChanged="EditSection" Margin="0,8"/></StackPanel>
+
+      <TextBlock Text="METRICS · EDIT ANY LABEL" Style="{StaticResource Muted}" Margin="0,18,0,6"/><StackPanel x:Name="MetricOptions"/>
+
+      <Separator Margin="0,14"/><TextBlock Text="SHARED APPEARANCE" Style="{StaticResource Muted}"/><TextBlock Text="Font" Style="{StaticResource Muted}" Margin="0,12,0,5"/><ComboBox Style="{StaticResource CaptureTargetStyle}" x:Name="FontSelector" SelectedIndex="0" SelectionChanged="EditShared" AutomationProperties.AutomationId="FontSelector"><ComboBoxItem Content="Consolas"/><ComboBoxItem Content="Segoe UI"/><ComboBoxItem Content="Arial"/><ComboBoxItem Content="Cascadia Mono"/></ComboBox>
+
+      <CheckBox x:Name="HideUnknownTechnology" Content="Hide unverified technology fields" IsChecked="True" Click="EditShared" ToolTip="Only show frame generation or upscaler information when it is verified."/>
+      <TextBlock Text="Overlay size · affects the in-game overlay" Style="{StaticResource Muted}" Margin="0,15,0,5"/><TextBlock x:Name="OverlaySizeLabel" Text="100%"/><Slider x:Name="OverlaySize" Minimum="50" Maximum="300" Value="100" TickFrequency="5" IsSnapToTickEnabled="True" ValueChanged="ChangeOverlaySize" AutomationProperties.AutomationId="OverlaySize"/>
+      <TextBlock Text="Background opacity · 0% is transparent" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,15,0,7"/><Slider x:Name="PanelOpacity" Minimum="0" Maximum="1" Value="0.65" ValueChanged="EditShared" AutomationProperties.AutomationId="PanelOpacity"/>
+
+      <Button Content="Reset layout" Click="ResetLayout" Margin="0,20,0,0"/>
+
+     </StackPanel></ScrollViewer>
+
+    </Grid></ScrollViewer>
+
+   </TabItem>
+
+   <TabItem Header="Settings" AutomationProperties.AutomationId="SettingsTab">
+
+     <ScrollViewer VerticalScrollBarVisibility="Auto"><Grid Margin="0,0,0,16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+
+      <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource Card}" Margin="0,0,0,16"><StackPanel><TextBlock Text="Startup &amp; shortcut" FontSize="22"/><TextBlock Text="Click the field, then press your shortcut. Ctrl + Shift + O works on compact keyboards." Foreground="#AEBED1" Margin="0,8,0,12"/><TextBox x:Name="HotkeyInput" IsReadOnly="True" PreviewKeyDown="RecordHotkey" AutomationProperties.AutomationId="HotkeyInput"/><CheckBox x:Name="OverlayStartup" Content="Enable the overlay when the app opens" IsChecked="True" Margin="0,16,0,0"/><CheckBox x:Name="StartMinimizedInput" Content="Open Frame Trace minimized to the taskbar" Margin="0,10,0,0"/><CheckBox x:Name="RunAtLoginInput" Content="Launch Frame Trace when I sign in to Windows" Margin="0,10,0,0"/></StackPanel></Border>
+
+     <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource Card}" Margin="0,0,0,16"><StackPanel><TextBlock Text="Automatic game detection" FontSize="22"/><TextBlock Text="Capture runs continuously and follows the foreground rendering process. Common browsers, launchers, and desktop apps are ignored. Unknown games do not need a prebuilt game profile." Foreground="#AEBED1" TextWrapping="Wrap" Margin="0,8,0,12"/><TextBlock Text="Ignore these applications · one filename per line" Style="{StaticResource Muted}"/><TextBox x:Name="IgnoredApps" AcceptsReturn="True" Height="105" VerticalScrollBarVisibility="Auto" AutomationProperties.AutomationId="IgnoredApps" Margin="0,7,0,0"/><TextBlock Text="Some non-game 3D apps can also be detected. Add them here to keep the overlay out of those apps." Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,8,0,0"/></StackPanel></Border>
+
+      <Border Grid.Row="1" Grid.ColumnSpan="3" Style="{StaticResource Card}" Margin="0,0,0,16"><StackPanel><TextBlock Text="Sensors &amp; compatibility" FontSize="22"/><TextBlock Text="Hardware sensor polling interval" Foreground="#AEBED1" Margin="0,12,0,4"/><DockPanel><TextBlock x:Name="SensorRefreshLabel" DockPanel.Dock="Right" Foreground="#83EFCD" VerticalAlignment="Center" Margin="12,0,0,0"/><Slider x:Name="SensorRefreshSlider" Minimum="250" Maximum="3000" Value="1000" TickFrequency="250" IsSnapToTickEnabled="True" ValueChanged="SensorRefreshChanged" AutomationProperties.AutomationId="SensorRefreshSlider"/></DockPanel><TextBlock Text="Choose 250–3000 ms. Faster sensor polling can add a little overhead; FPS sampling remains event-driven. Windowed and borderless overlays use the Windows desktop compositor. True exclusive fullscreen is not supported by this desktop overlay. AFMF behavior can change when an overlay is visible; hide it to compare while capture continues." Foreground="#AEBED1" TextWrapping="Wrap" Margin="0,8,0,12"/><WrapPanel><Button Content="CPU sensor setup ↗" Click="OpenSensorDriver"/><Button x:Name="AdministratorButton" Content="Restart as administrator" Click="RestartElevated" Margin="10,0,0,0"/><Button Content="Export diagnostics" Click="ExportDiagnostics" Margin="10,0,0,0"/></WrapPanel></StackPanel></Border>
+
+      <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource Card}" Margin="0,0,0,16"><StackPanel><TextBlock Text="Accessibility" FontSize="22"/><CheckBox x:Name="ReduceMotionInput" Content="Reduce background motion" Margin="0,14,0,0"/><TextBlock Text="Keeps the app background still while leaving the game overlay and its readings unchanged." Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,7,0,0"/></StackPanel></Border>
+
+      <Border Grid.Row="2" Grid.Column="2" Style="{StaticResource Card}" Margin="0,0,0,16"><StackPanel><TextBlock Text="Updates" FontSize="22"/><TextBlock Text="Frame Trace checks GitHub for a newer stable release. Updates open on the release page and are never installed without you." Foreground="#AEBED1" TextWrapping="Wrap" Margin="0,8,0,10"/><CheckBox x:Name="CheckUpdatesOnStartupInput" Content="Check for updates when Frame Trace opens"/><WrapPanel Margin="0,10,0,0"><Button x:Name="CheckForUpdatesButton" Content="Check now" Click="CheckForUpdates" AutomationProperties.AutomationId="CheckForUpdates"/><TextBlock x:Name="UpdateCheckStatus" Text="Not checked yet." Style="{StaticResource Muted}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="12,0,0,0"/></WrapPanel></StackPanel></Border>
+
+      <StackPanel Grid.Row="3" Grid.ColumnSpan="3" Orientation="Horizontal" VerticalAlignment="Center"><Button Content="Save settings" Click="SaveSettings" AutomationProperties.AutomationId="SaveSettings" Background="{DynamicResource Accent}" Foreground="#10221C" HorizontalAlignment="Left"/></StackPanel>
+
+    </Grid></ScrollViewer>
+
+   </TabItem>
+
+  </TabControl>
+
+   <TextBlock x:Name="Status" Grid.Row="3" Text="Starting automatic capture…" Foreground="#AEBED1" Margin="0,18,0,0" TextWrapping="Wrap"/>
+
+ </Grid>
+ </Grid>
+
+</Window>

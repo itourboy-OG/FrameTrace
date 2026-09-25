@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+
+    <OutputType>WinExe</OutputType>
+
+    <TargetFramework>net9.0-windows</TargetFramework>
+
+    <UseWPF>true</UseWPF>
+
+    <Nullable>enable</Nullable>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+
+    <Version>0.7.10</Version>
+
+    <AssemblyName>FrameTrace</AssemblyName>
+
+    <RootNamespace>Frameglass</RootNamespace>
+
+    <Product>Frame Trace</Product>
+
+    <Title>Frame Trace</Title>
+
+    <ApplicationIcon>Assets/FrameTrace.ico</ApplicationIcon>
+
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(PreviewBuild)' == 'true'">
+    <DefineConstants>$(DefineConstants);PREVIEW_BUILD</DefineConstants>
+    <ApplicationManifest>app-preview.manifest</ApplicationManifest>
+    <Version>0.7.10</Version>
+    <AssemblyName>FrameTracePreview</AssemblyName>
+    <Product>Frame Trace Preview</Product>
+    <Title>Frame Trace Preview</Title>
+  </PropertyGroup>
+
+  <ItemGroup>
+
+    <Resource Include="Assets/FrameTrace.ico" /><Resource Include="Assets/FrameTrace.png" />
+
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+
+    <Content Include="../vendor/*" Link="vendor/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+
+  </ItemGroup>
+
+</Project>
+
+
+

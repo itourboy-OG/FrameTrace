@@ -1,0 +1,5 @@
+**/bin/
+**/obj/
+artifacts/
+vendor/PresentMon.exe
+*.user
