@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private Preferences preferences = Preferences.Initial;
 
     private Preferences draft = Preferences.Initial;
+    private Preferences layoutBaseline = Preferences.Initial;
 
     private HardwareMonitor? hardware;
 
@@ -82,12 +83,14 @@ public partial class MainWindow : Window
 
         InitializeComponent();
         Title = AppIdentity.ProductName;
+        Height = Math.Min(Height, SystemParameters.WorkArea.Height);
+        MinHeight = Math.Min(MinHeight, Height);
 
         PreviewViewport.Content = preview; preview.EnableEditing();
 
         preview.SectionSelected += SelectEditorSection;
 
-        preview.SectionsMoved += sections => { draft = draft with { Sections = sections }; RefreshTestOverlay(); };
+        preview.SectionsMoved += sections => { draft = draft with { Sections = sections }; RefreshTestOverlay(); RefreshLayoutNotice(); };
 
         Loaded += (_, _) =>
 
@@ -97,7 +100,7 @@ public partial class MainWindow : Window
 
             {
 
-                preferences = Preferences.Load(); draft = preferences; enabled = preferences.OverlayEnabled;
+                preferences = Preferences.Load(); draft = preferences; layoutBaseline = preferences; enabled = preferences.OverlayEnabled;
                 AnimatedBackground.SetReducedMotion(preferences.ReduceMotion);
                 if (preferences.StartMinimized) WindowState = WindowState.Minimized;
 
@@ -411,8 +414,10 @@ public partial class MainWindow : Window
 
             preferences = next; draft = next; overlay?.Apply(next); preview.Apply(next);
             AnimatedBackground.SetReducedMotion(next.ReduceMotion);
+            SetLayoutBaseline();
 
-            Status.Text = StudioStatus.Text = "Saved. Your overlay and shortcut are ready.";
+            StudioStatus.Text = "";
+            Status.Text = "Saved. Your overlay and shortcut are ready.";
 
         }
 
@@ -442,13 +447,23 @@ public partial class MainWindow : Window
 
         if (dialog.ShowDialog(this) != true) return;
 
-        try { draft = Preferences.ApplyImportedLayout(draft, Preferences.Parse(File.ReadAllText(dialog.FileName))); LoadControls(); StudioStatus.Text = "Layout loaded in preview. Save & apply when ready."; }
+        try
+        {
+            Preferences imported = Preferences.Parse(File.ReadAllText(dialog.FileName));
+            if (!ConfirmLayoutReplacement("import this layout")) return;
+            draft = Preferences.ApplyImportedLayout(draft, imported); LoadControls(); SetLayoutBaseline();
+            StudioStatus.Text = "Layout loaded in preview. Save & apply when ready.";
+        }
 
         catch (Exception error) { Report("Layout import failed", error); }
 
     }
 
-    private void ResetLayout(object sender, RoutedEventArgs e) { draft = draft with { Sections = Preferences.Initial.Sections }; LoadControls(); }
+    private void ResetLayout(object sender, RoutedEventArgs e)
+    {
+        if (!ConfirmLayoutReplacement("reset the layout")) return;
+        draft = draft with { Sections = Preferences.Initial.Sections }; LoadControls();
+    }
 
     private void PageChanged(object sender, SelectionChangedEventArgs e) { if (ready && e.Source == Pages) preview.UpdateData(OverlayData.Build(readings, summary)); }
 

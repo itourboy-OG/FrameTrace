@@ -26,7 +26,8 @@ public partial class MainWindow
         DisplaySelector.SelectedItem = displays.FirstOrDefault(d => d.Bounds == current) ?? displays.Single(d => d.Primary);
         PresetSelector.ItemsSource = LayoutPresets.Names; PresetSelector.SelectedIndex = 0;
 #if PREVIEW_BUILD
-        string stableLayoutsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Frameglass", "saved-layouts.json");
+        string stableDirectory = Directory.Exists(AppIdentity.StableDataDirectory) ? AppIdentity.StableDataDirectory : AppIdentity.LegacyDataDirectory;
+        string stableLayoutsPath = Path.Combine(stableDirectory, "saved-layouts.json");
         CustomPresetSelector.ItemsSource = SavedLayouts.ReadPreview(SavedLayouts.FilePath, stableLayoutsPath);
 #else
         CustomPresetSelector.ItemsSource = SavedLayouts.Read(SavedLayouts.FilePath);
@@ -109,11 +110,23 @@ public partial class MainWindow
     private void ApplyPreset(object sender, RoutedEventArgs e)
     {
         if (PresetSelector.SelectedItem is not string name) return;
+        if (!ConfirmLayoutReplacement($"load ‘{name}’")) return;
         draft = LayoutPresets.Create(draft, name); preview.Apply(draft); RefreshTestOverlay();
         preview.UpdateData(OverlayData.Build(readings, summary));
-        draft = preview.ArrangePreset(name); LoadControls();
+        draft = preview.ArrangePreset(name); LoadControls(); SetLayoutBaseline();
         StudioStatus.Text = name + " is ready in preview. Save & apply when it looks right.";
     }
+
+    private bool ConfirmLayoutReplacement(string action) => !Preferences.HasLayoutChanges(draft, layoutBaseline)
+        || MessageBox.Show(this, $"Discard your unsaved overlay edits and {action}?\n\nChoose No to keep editing. Use Save & apply or Save preset to keep your changes.", "Unsaved overlay edits", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) == MessageBoxResult.Yes;
+
+    private void SetLayoutBaseline()
+    {
+        layoutBaseline = draft;
+        RefreshLayoutNotice();
+    }
+
+    private void RefreshLayoutNotice() => UnsavedLayoutNotice.Visibility = Preferences.HasLayoutChanges(draft, layoutBaseline) ? Visibility.Visible : Visibility.Collapsed;
     private void LoadControls()
     {
         RefreshSectionSelector();
@@ -128,7 +141,7 @@ public partial class MainWindow
         FontSelector.SelectedIndex = Array.IndexOf(new[] { "Consolas", "Segoe UI", "Arial", "Cascadia Mono" }, draft.Font);
         OverlaySize.Value = draft.OverlayScale * 100; OverlaySizeLabel.Text = $"{draft.OverlayScale:P0}";
         HideUnknownTechnology.IsChecked = draft.HideUnknownTechnology;
-        PanelOpacity.Value = draft.Opacity; loading = false; LoadSection(); preview.Apply(draft); RefreshTestOverlay(); preview.UpdateGraph(summary.Points);
+        PanelOpacity.Value = draft.Opacity; loading = false; LoadSection(); preview.Apply(draft); RefreshTestOverlay(); preview.UpdateGraph(summary.Points); RefreshLayoutNotice();
     }
     private void LoadSection()
     {
@@ -187,6 +200,7 @@ public partial class MainWindow
         draft = draft with { Sections = draft.Sections.Select(s => s.Key == section.Key ? section : s).ToImmutableArray() };
         RefreshSectionSelector(); preview.Apply(draft); RefreshTestOverlay(); preview.UpdateGraph(summary.Points);
         StudioStatus.Text = "Preview updated. Save & apply to use this layout in your game.";
+        RefreshLayoutNotice();
     }
     private void ChangeOverlaySize(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
@@ -197,6 +211,7 @@ public partial class MainWindow
             draft = draft with { OverlayScale = resized.OverlayScale, Sections = resized.Sections };
             OverlaySizeLabel.Text = $"{draft.OverlayScale:P0}";
             preview.Apply(draft); RefreshTestOverlay(); preview.UpdateGraph(summary.Points);
+            RefreshLayoutNotice();
         }
         catch (ArgumentException error)
         {
@@ -215,7 +230,7 @@ public partial class MainWindow
     private void EditShared(object sender, RoutedEventArgs e)
     {
         if (!ready || loading) return;
-        draft = draft with { Font = (string)((ComboBoxItem)FontSelector.SelectedItem).Content, Opacity = PanelOpacity.Value, HideUnknownTechnology = HideUnknownTechnology.IsChecked == true }; preview.Apply(draft); RefreshTestOverlay(); preview.UpdateGraph(summary.Points);
+        draft = draft with { Font = (string)((ComboBoxItem)FontSelector.SelectedItem).Content, Opacity = PanelOpacity.Value, HideUnknownTechnology = HideUnknownTechnology.IsChecked == true }; preview.Apply(draft); RefreshTestOverlay(); preview.UpdateGraph(summary.Points); RefreshLayoutNotice();
     }
     private void PickNameColor(object sender, RoutedEventArgs e)
     {

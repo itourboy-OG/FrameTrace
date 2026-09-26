@@ -225,6 +225,9 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
         OverlayScale = current.OverlayScale, HideUnknownTechnology = current.HideUnknownTechnology, Sections = current.Sections
     });
 
+    public static bool HasLayoutChanges(Preferences current, Preferences baseline) =>
+        JsonSerializer.Serialize(ForLayoutExport(current)) != JsonSerializer.Serialize(ForLayoutExport(baseline));
+
     public static Preferences ApplyImportedLayout(Preferences current, Preferences imported) => Validate(imported with
     {
         Shortcut = current.Shortcut, OverlayEnabled = current.OverlayEnabled, IgnoredApps = current.IgnoredApps,

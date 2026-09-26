@@ -21,7 +21,10 @@ internal static class AppIdentity
 #if PREVIEW_BUILD
         "FrameTracePreview"
 #else
-        "Frameglass"
+        "FrameTrace"
 #endif
     );
+
+    public static string StableDataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FrameTrace");
+    public static string LegacyDataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Frameglass");
 }

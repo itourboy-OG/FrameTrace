@@ -11,7 +11,7 @@ function Stop-TestSession {
 
 $testRoot = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
-$release = Join-Path $PSScriptRoot 'artifacts/app-0.7.10'
+$release = Join-Path $PSScriptRoot 'artifacts/app-0.7.13'
 $ready = Join-Path $testRoot ([Guid]::NewGuid().ToString('N') + '.ready')
 $probe = Start-Process -FilePath (Join-Path $release 'FrameTrace.exe') -ArgumentList @('--capture-lifetime-probe', ('"{0}"' -f $ready)) -WindowStyle Hidden -PassThru
 try {

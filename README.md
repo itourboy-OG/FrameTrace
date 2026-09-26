@@ -12,7 +12,7 @@
     <td align="center" colspan="2"><strong>Settings</strong><br><img src="docs/screenshots/settings.png" alt="Frame Trace settings, including startup, accessibility, and update options" width="720"></td>
   </tr>
   <tr>
-    <td align="center" colspan="2"><strong>Settings · accessibility and updates</strong><br><img src="docs/screenshots/settings-bottom.png" alt="Reduced motion and GitHub update settings" width="720"></td>
+    <td align="center" colspan="2"><strong>Settings · accessibility, updates and feedback</strong><br><img src="docs/screenshots/settings-bottom.png" alt="Reduced motion, update checks, and community feedback options" width="720"></td>
   </tr>
 </table>
 
@@ -27,7 +27,7 @@ The installer is unsigned in this early release, so Windows may show a SmartScre
 - **Automatic capture:** follows the foreground application that is presenting frames. If detection misses a game, select its running process from the dashboard. You do not need to choose an executable file or start capture manually.
 - **Frame performance:** app/present FPS, observed display FPS, rolling average, 1% low, frame time, and a live frame-time graph.
 - **Hardware readings:** GPU load, temperature, power, clock, and VRAM; CPU load, temperature, and power where the sensor driver exposes them; physical RAM used.
-- **Overlay Studio:** drag or group-select items, add separate metrics, rename labels, adjust colors, fonts, sizes, layout, graph dimensions, and opacity. Match the canvas to your monitor, use the grid and snapping, save named presets, and test edits live.
+- **Overlay Studio:** drag or group-select items, add separate metrics, rename labels, adjust colors, fonts, sizes, layout, graph dimensions, and opacity. Match the canvas to your monitor, use the grid and snapping, save or delete named presets, and test edits live. An unsaved-edits indicator and confirmation protect edits before loading another preset, importing a layout, or resetting it.
 - **Settings:** customize the overlay shortcut and startup state, launch at Windows sign-in, start minimized, reduce background motion, ignore selected processes, adjust sensor polling, and choose whether to check for updates on startup.
 - **Update notice:** checks the public GitHub Releases API and links to the newest stable release. It does not upload performance readings or install software.
 
@@ -44,7 +44,7 @@ The Windows smoke suite passes locally, including real PresentMon capture, senso
 
 ## Settings and privacy
 
-Frame Trace stores preferences locally in `%LOCALAPPDATA%\Frameglass`. The update check makes a normal HTTPS request to GitHub for the latest public release; it sends the app's version in the request header and does not send hardware data, game names, or frame readings. Automatic checking can be disabled in Settings; **Check now** remains available.
+Frame Trace stores preferences locally in `%LOCALAPPDATA%\FrameTrace`. On first startup after an upgrade, it renames the legacy `Frameglass` data folder, preserving preferences, custom presets, and diagnostics. If both folders exist, startup reports the conflict and leaves them unchanged. The update check makes a normal HTTPS request to GitHub for the latest public release; it sends the app's version in the request header and does not send hardware data, game names, or frame readings. Automatic checking can be disabled in Settings; **Check now** remains available.
 
 Diagnostics are exported only when you choose **Export diagnostics**. Diagnostic files can include hardware readings, process names, and recent frame data. Review a file before sharing it.
 
@@ -56,7 +56,7 @@ Requirements: Windows 10 or later, .NET 9 SDK, and Inno Setup 6.
 
 ```powershell
 ./build.ps1
-./artifacts/app-0.7.10/FrameTrace.exe --smoke-test C:/path/to/test-results
+./artifacts/app-0.7.13/FrameTrace.exe --smoke-test C:/path/to/test-results
 ```
 
 The build creates a self-contained Windows x64 application and per-user installer. It downloads PresentMon 2.6.0 when needed and verifies its SHA-256 before packaging. The smoke test writes a `result.txt` report and screenshots; it uses real local sensors and ETW capture but does not validate every game or anti-cheat.
@@ -75,6 +75,8 @@ Frame Trace's source code is licensed under [MIT](LICENSE). Third-party componen
 ### Feedback and bug reports
 
 Have an idea, question, or problem to report? [Open a GitHub issue](https://github.com/itourboy-OG/FrameTrace/issues/new/choose) and choose **Bug report** for something that is not working, or **Feedback or language request** for ideas, general feedback, and language requests. Fill in the form and submit it; you do not need to know Git or write code. If you are unsure which option fits, use the feedback form. If someone has already reported the same thing, add a comment to that issue instead.
+
+Inside the app, **Settings → Help improve Frame Trace** opens these forms through **Report a problem** or **Send feedback / Request a language**. Nothing is uploaded automatically.
 
 Issues are public. Do not include passwords, account details, or other private information. A diagnostics file is optional; review it first because it can contain hardware readings, process names, and recent frame data. See [Settings and privacy](#settings-and-privacy) for details.
 

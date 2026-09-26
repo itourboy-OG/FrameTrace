@@ -8,6 +8,15 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+#if !PREVIEW_BUILD
+        try { DataMigration.MoveLegacyDirectory(AppIdentity.LegacyDataDirectory, AppIdentity.StableDataDirectory); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show("Frame Trace could not migrate its local data.\n\n" + error.Message, "Local data migration failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+            return;
+        }
+#endif
         if (e.Args.Length == 2 && e.Args[0] == "--capture-lifetime-probe")
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;

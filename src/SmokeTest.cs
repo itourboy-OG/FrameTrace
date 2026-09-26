@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Automation;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
@@ -62,6 +63,8 @@ public static class SmokeTest
             Require(!sharedLayout.StartMinimized && !sharedLayout.RunAtLogin && !sharedLayout.ReduceMotion && sharedLayout.CheckUpdatesOnStartup && sharedLayout.IgnoredApps.SequenceEqual(Preferences.Initial.IgnoredApps), "Layout export included local startup, accessibility, update, or ignore-list settings.");
             Preferences importedLayout = Preferences.ApplyImportedLayout(localSettings, Preferences.Initial with { Font = "Arial" });
             Require(importedLayout.Font == "Arial" && importedLayout.Shortcut == localSettings.Shortcut && !importedLayout.OverlayEnabled && importedLayout.IgnoredApps.SequenceEqual(localSettings.IgnoredApps) && importedLayout.SensorRefreshMs == 1500 && importedLayout.StartMinimized && importedLayout.RunAtLogin && importedLayout.ReduceMotion && !importedLayout.CheckUpdatesOnStartup, "Importing a layout changed local app settings.");
+            Require(!Preferences.HasLayoutChanges(localSettings, Preferences.Initial), "Local app settings incorrectly marked the overlay layout as edited.");
+            Require(!Preferences.HasLayoutChanges(Preferences.Parse(JsonSerializer.Serialize(custom)), custom) && Preferences.HasLayoutChanges(custom, Preferences.Initial), "Layout edit detection missed customization or marked identical layouts as edited.");
             try { Preferences.Validate(Preferences.Initial with { SensorRefreshMs = 251 }); throw new InvalidDataException("Invalid sensor refresh interval was accepted."); }
             catch (InvalidDataException error) when (error.Message.StartsWith("Sensor refresh interval", StringComparison.Ordinal)) { }
             foreach (string preset in LayoutPresets.Names)
@@ -86,6 +89,7 @@ public static class SmokeTest
                     ((Button)window.FindName("OverlayButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             };
             window.Show();
+            await window.Dispatcher.InvokeAsync(() => window.UpdateLayout(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             window.Activate();
             bool reduceMotion = Preferences.Load().ReduceMotion;
             Require(window.AnimatedBackground.ReducedMotion == reduceMotion && window.AnimatedBackground.IsAnimating == !reduceMotion, "The background motion setting was not applied on startup.");
@@ -104,6 +108,7 @@ public static class SmokeTest
             CheckCanvasEditing();
             CheckTableLabelStability();
             CheckSavedPresets(outputDirectory);
+            CheckDataMigration(outputDirectory);
             TextBlock title = (TextBlock)window.FindName("HardwareStatus");
             title.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0.4, 1, TimeSpan.FromSeconds(0.7)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever });
             FrameSummary captured;
@@ -191,6 +196,8 @@ public static class SmokeTest
             overlay.Apply(Preferences.Initial with { Opacity = 0.4 }); overlay.UpdateLayout();
             Require(overlay.Topmost && overlay.ActualWidth < display.CanvasSize.Width, "Overlay must be topmost and cropped to content.");
             SaveImage(overlay, Path.Combine(outputDirectory, "overlay.png")); overlay.Close();
+            window.Activate();
+            await window.Dispatcher.InvokeAsync(() => window.UpdateLayout(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             ComboBox capturePicker = (ComboBox)window.FindName("CaptureTargetSelector");
             capturePicker.IsDropDownOpen = true;
             await Task.Delay(200);
@@ -200,6 +207,11 @@ public static class SmokeTest
             Point pickerOrigin = capturePicker.PointToScreen(new Point());
             Require(Math.Abs(popupOrigin.X - pickerOrigin.X) < 2, "Capture popup is offset outside its control.");
             capturePicker.IsDropDownOpen = false;
+            ScrollViewer dashboard = (ScrollViewer)window.FindName("DashboardScroll");
+            window.UpdateLayout();
+            Require(window.Height <= SystemParameters.WorkArea.Height, "The startup window extends beyond the screen's usable height.");
+            if (SystemParameters.WorkArea.Height >= 1120)
+                Require(dashboard.ScrollableHeight < 1, $"The startup dashboard still clips its hardware cards: overflow={dashboard.ScrollableHeight:0.##}.");
             SaveImage(window, Path.Combine(outputDirectory, "dashboard.png"));
             ((TabControl)window.FindName("Pages")).SelectedIndex = 1;
             await Task.Delay(400);
@@ -224,6 +236,7 @@ public static class SmokeTest
             Require(itemCanvas.Selection.Contains(separate.Key), "Separate metric could not be selected on the canvas.");
             FindButton(window, "RemoveOverlayItemButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Require(items.Items.Count == originalCount + 1 && !itemCanvas.Children.OfType<Border>().Any(panel => (string)panel.Tag == separate.Key), "Removing a separate metric left its renderer behind.");
+            await CheckUnsavedLayoutAsync(window, outputDirectory);
             ComboBox presets = (ComboBox)window.FindName("PresetSelector");
             ((Slider)window.FindName("ZoomSlider")).Value = 100;
             foreach (string preset in LayoutPresets.Names)
@@ -280,6 +293,7 @@ public static class SmokeTest
             ScrollViewer settingsPage = (ScrollViewer)((TabControl)window.FindName("Pages")).SelectedContent;
             settingsPage.ScrollToVerticalOffset(settingsPage.ScrollableHeight);
             await Task.Delay(150);
+            Require(FindButton(window, "ReportProblemButton").IsVisible && FindButton(window, "SendFeedbackButton").IsVisible, "The feedback actions are missing from Settings.");
             SaveImage(window, Path.Combine(outputDirectory, "settings-bottom.png"));
             Preferences.Write(Preferences.Initial, Path.Combine(outputDirectory, "layout.json"));
             Require(Preferences.Parse(File.ReadAllText(Path.Combine(outputDirectory, "layout.json"))).Sections.Length == 4, "Layout round trip failed.");
@@ -323,7 +337,7 @@ public static class SmokeTest
     }
     private static void CheckSavedPresets(string directory)
     {
-        string path = Path.Combine(directory, "saved-layouts.json");
+        string path = Path.Combine(directory, "saved-layouts-" + Guid.NewGuid().ToString("N") + ".json");
         SectionStyle metric = Preferences.Initial.Sections[1] with { Id = Guid.NewGuid().ToString("N"), Metrics = ["temperature"], LabelSize = 31, X = 0.7 };
         Preferences custom = Preferences.Initial with { OverlayScale = 1.5, Sections = Preferences.Initial.Sections.Add(metric) };
         SavedLayouts.Save("My custom layout", custom, path);
@@ -334,6 +348,15 @@ public static class SmokeTest
         Preferences current = Preferences.Initial with { Shortcut = new Hotkey(3, 0x4B) };
         Preferences restored = SavedLayouts.Apply(current, saved.Single(item => item.Name == "My custom layout"));
         Require(restored.Sections.Length == 5 && restored.Sections.Last().Key == metric.Key && restored.Sections.Last().LabelSize == 31 && restored.OverlayScale == 1.5 && restored.Opacity == 0.3 && restored.Shortcut == current.Shortcut, "Saved preset lost customization or changed the user's shortcut.");
+        SavedLayouts.Delete("MY CUSTOM LAYOUT", path);
+        ImmutableArray<NamedLayout> remaining = SavedLayouts.Read(path);
+        Require(remaining.Length == 1 && JsonSerializer.Serialize(remaining[0]) == JsonSerializer.Serialize(saved.Single(item => item.Name == "Second layout")), "Deleting a preset did not persist or changed another saved preset.");
+        try { SavedLayouts.Delete("My custom layout", path); throw new InvalidOperationException("Deleting a missing preset was accepted."); }
+        catch (KeyNotFoundException) { }
+        SavedLayouts.Delete("Second layout", path);
+        Require(SavedLayouts.Read(path).IsEmpty, "Deleting the final custom preset did not leave a valid empty preset list.");
+        SavedLayouts.Save("Replacement layout", custom, path);
+        Require(SavedLayouts.Read(path) is [{ Name: "Replacement layout" }], "A custom preset could not be saved after deleting all presets.");
         Preferences migrated = Preferences.Parse(JsonSerializer.Serialize(Preferences.Initial with { SchemaVersion = 3 }));
         Require(migrated.SchemaVersion == 4 && migrated.Sections.Length == 4, "Existing layouts did not migrate.");
         string stablePath = Path.Combine(directory, "stable", "saved-layouts.json");
@@ -344,13 +367,85 @@ public static class SmokeTest
         Require(previewLayouts is [{ Name: "OG" }] && SavedLayouts.Read(previewPath).Single().Name == "OG", "Preview did not import the existing stable custom preset.");
         Require(File.ReadAllText(stablePath) == stableContents, "Importing a preset changed the stable profile file.");
     }
+    private static void CheckDataMigration(string directory)
+    {
+        string root = Path.Combine(directory, "migration", Guid.NewGuid().ToString("N"));
+        string legacy = Path.Combine(root, "Frameglass"), current = Path.Combine(root, "FrameTrace");
+        Preferences.Write(Preferences.Initial with { StartMinimized = true, SensorRefreshMs = 250 }, Path.Combine(legacy, "preferences.json"));
+        SavedLayouts.Save("OG", Preferences.Initial with { OverlayScale = 1.25 }, Path.Combine(legacy, "saved-layouts.json"));
+        File.WriteAllText(Path.Combine(legacy, "diagnostics.jsonl"), "retained diagnostic data");
+        byte[] preferences = File.ReadAllBytes(Path.Combine(legacy, "preferences.json"));
+        byte[] presets = File.ReadAllBytes(Path.Combine(legacy, "saved-layouts.json"));
+        DataMigration.MoveLegacyDirectory(legacy, current);
+        Require(!Directory.Exists(legacy) && File.ReadAllBytes(Path.Combine(current, "preferences.json")).SequenceEqual(preferences) && File.ReadAllBytes(Path.Combine(current, "saved-layouts.json")).SequenceEqual(presets), "Data migration changed preferences or custom presets.");
+        Require(Preferences.Parse(File.ReadAllText(Path.Combine(current, "preferences.json"))).SensorRefreshMs == 250 && SavedLayouts.Read(Path.Combine(current, "saved-layouts.json")) is [{ Name: "OG" }] && File.ReadAllText(Path.Combine(current, "diagnostics.jsonl")) == "retained diagnostic data", "Migrated settings, presets, or diagnostics could not be read.");
+        DataMigration.MoveLegacyDirectory(legacy, current);
+        Directory.CreateDirectory(legacy);
+        File.WriteAllText(Path.Combine(legacy, "preferences.json"), "conflicting legacy data");
+        try { DataMigration.MoveLegacyDirectory(legacy, current); throw new InvalidOperationException("Conflicting data folders were overwritten."); }
+        catch (IOException error) when (error.Message.StartsWith("Cannot migrate local data", StringComparison.Ordinal)) { }
+        Require(File.ReadAllText(Path.Combine(legacy, "preferences.json")) == "conflicting legacy data" && File.ReadAllBytes(Path.Combine(current, "preferences.json")).SequenceEqual(preferences), "Migration conflict handling changed either data folder.");
+    }
+
+    private static async Task CheckUnsavedLayoutAsync(MainWindow window, string directory)
+    {
+        ComboBox section = (ComboBox)window.FindName("SectionSelector");
+        section.SelectedIndex = 0;
+        TextBox name = (TextBox)window.FindName("SectionName");
+        TextBlock notice = (TextBlock)window.FindName("UnsavedLayoutNotice");
+        name.Text = "KEEP MY EDITS";
+        Require(notice.Visibility == Visibility.Visible, "Editing a layout did not show the unsaved indicator.");
+        ((ComboBox)window.FindName("PresetSelector")).SelectedItem = "Classic RTSS";
+        Task keep = RespondToLayoutPromptAsync("7");
+        FindButton(window, "ApplyPresetButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await keep;
+        Require(name.Text == "KEEP MY EDITS" && notice.Visibility == Visibility.Visible, "Declining preset replacement lost the current edits.");
+        SaveImage(window, Path.Combine(directory, "unsaved-layout.png"));
+        Task discard = RespondToLayoutPromptAsync("6");
+        FindButton(window, "ApplyPresetButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await discard;
+        Require(name.Text != "KEEP MY EDITS" && notice.Visibility == Visibility.Collapsed, "Confirming preset replacement did not load a clean layout.");
+        name.Text = "KEEP CUSTOM EDITS";
+        Task keepCustom = RespondToLayoutPromptAsync("7");
+        FindButton(window, "LoadCustomPresetButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await keepCustom;
+        Require(name.Text == "KEEP CUSTOM EDITS", "Declining a saved preset replacement lost the current edits.");
+        Task discardCustom = RespondToLayoutPromptAsync("6");
+        FindButton(window, "LoadCustomPresetButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await discardCustom;
+        Require(notice.Visibility == Visibility.Collapsed && ((TextBox)window.FindName("CustomPresetName")).Text == "OG", "Loading a saved preset did not establish a clean layout.");
+    }
+
+    private static Task RespondToLayoutPromptAsync(string buttonId) => Task.Run(async () =>
+    {
+        Stopwatch timeout = Stopwatch.StartNew();
+        while (timeout.Elapsed < TimeSpan.FromSeconds(5))
+        {
+            AutomationElement? dialog = AutomationElement.RootElement.FindFirst(TreeScope.Descendants, new AndCondition(
+                new PropertyCondition(AutomationElement.ProcessIdProperty, Environment.ProcessId),
+                new PropertyCondition(AutomationElement.ClassNameProperty, "#32770")));
+            AutomationElement? button = dialog?.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.AutomationIdProperty, buttonId));
+            if (button is not null)
+            {
+                ((InvokePattern)button.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
+                return;
+            }
+            await Task.Delay(50);
+        }
+        throw new TimeoutException($"The unsaved-layout dialog did not expose button ID {buttonId}.");
+    });
     private static async Task CheckCustomPresetDropdownAsync(MainWindow window, string directory)
     {
         ComboBox selector = (ComboBox)window.FindName("CustomPresetSelector");
+        Button delete = (Button)window.FindName("DeleteCustomPresetButton");
+        Button load = (Button)window.FindName("LoadCustomPresetButton");
+        selector.SelectedIndex = -1;
+        Require(!delete.IsEnabled && !load.IsEnabled, "Saved preset actions are enabled without a selection.");
         ImmutableArray<NamedLayout> presets = [new("OG", Preferences.Initial)];
         SavedLayouts.Save("OG", presets[0].Layout, Path.Combine(directory, "saved-layouts-ui.json"));
         selector.ItemsSource = presets;
         selector.SelectedIndex = 0;
+        Require(delete.IsEnabled && load.IsEnabled, "Saved preset actions are unavailable after selecting a custom preset.");
         selector.IsDropDownOpen = true;
         await Task.Delay(150);
         Popup popup = (Popup)selector.Template.FindName("PART_Popup", selector);
@@ -436,14 +531,18 @@ public static class SmokeTest
             OverlayTestWindow testScene = Application.Current.Windows.OfType<OverlayTestWindow>().Single();
             OverlayWindow liveOverlay = Application.Current.Windows.OfType<OverlayWindow>().Single();
             Require(liveOverlay.IsVisible, "Live test overlay hid while editing the dashboard.");
-            ((TextBox)window.FindName("SectionName")).Text = "LIVE TEST LABEL";
+            string liveLabel = "LIVE TEST " + Guid.NewGuid().ToString("N")[..8];
+            ((TextBox)window.FindName("SectionName")).Text = liveLabel;
             CheckBox showTitle = (CheckBox)window.FindName("ShowSectionName");
             showTitle.IsChecked = true; showTitle.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
             await Task.Delay(200);
-            Require(VisualText(liveOverlay.Surface).Contains("LIVE TEST LABEL"), "Label edits did not reach the live overlay before saving.");
+            Require(VisualText(liveOverlay.Surface).Contains(liveLabel), "Label edits did not reach the live overlay before saving.");
+            Require(((TextBlock)window.FindName("UnsavedLayoutNotice")).Visibility == Visibility.Visible, "Live edits did not mark the layout as unsaved.");
             ComboBox preset = (ComboBox)window.FindName("PresetSelector");
             preset.SelectedItem = "Classic RTSS";
+            Task discard = RespondToLayoutPromptAsync("6");
             FindButton(window, "ApplyPresetButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            await discard;
             Slider size = (Slider)window.FindName("OverlaySize");
             double oldScale = size.Value;
             double oldHeight = liveOverlay.Surface.VisibleBounds().Height;
@@ -452,7 +551,7 @@ public static class SmokeTest
             Require(Math.Abs(liveOverlay.Surface.VisibleBounds().Height / oldHeight - size.Value / oldScale) < 0.03 && size.Value != oldScale, "Overlay size slider did not resize the live overlay proportionally.");
             SaveImage(testScene, Path.Combine(outputDirectory, "test-scene.png"));
             testScene.Close();
-            Require(!liveOverlay.IsVisible && !VisualText(liveOverlay.Surface).Contains("LIVE TEST LABEL"), "Closing the test did not restore the saved overlay.");
+            Require(!liveOverlay.IsVisible && !VisualText(liveOverlay.Surface).Contains(liveLabel), "Closing the test did not restore the saved overlay.");
             Require((File.Exists(Preferences.FilePath) ? File.ReadAllText(Preferences.FilePath) : "") == savedBeforeTest, "Live testing changed saved preferences without Save & apply.");
             testButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             testButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
