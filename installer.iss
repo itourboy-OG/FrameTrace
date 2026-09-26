@@ -1,7 +1,7 @@
 [Setup]
 AppId={{8908BB9E-E539-45D7-AFA4-F041C955B928}
 AppName=Frame Trace
-AppVersion=0.7.13
+AppVersion=0.7.14
 AppPublisher=Frame Trace contributors
 DefaultDirName={localappdata}\Programs\FrameTrace
 DefaultGroupName=Frame Trace
@@ -11,7 +11,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 OutputDir=..
-OutputBaseFilename=FrameTrace-0.7.13-Setup
+OutputBaseFilename=FrameTrace-0.7.14-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -34,7 +34,7 @@ Type: files; Name: "{autodesktop}\Frameglass.lnk"
 
 [Files]
 Source: "prepare-update.ps1"; Flags: dontcopy
-Source: "artifacts\app-0.7.13\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "artifacts\app-0.7.14\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked

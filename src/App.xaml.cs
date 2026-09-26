@@ -34,6 +34,13 @@ public partial class App : Application
             Shutdown(Environment.ExitCode);
             return;
         }
+        if (e.Args.Length == 2 && e.Args[0] == "--update-test")
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            await SmokeTest.RunUpdateAsync(Path.GetFullPath(e.Args[1]));
+            Shutdown(Environment.ExitCode);
+            return;
+        }
         if (e.Args.Length == 2 && e.Args[0] == "--studio-test")
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;

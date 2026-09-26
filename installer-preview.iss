@@ -1,7 +1,7 @@
 [Setup]
 AppId={{443FF778-DC03-4A24-967A-A4F4D42D3175}
 AppName=Frame Trace Preview
-AppVersion=0.7.13
+AppVersion=0.7.14
 AppPublisher=Frame Trace contributors
 DefaultDirName={localappdata}\Programs\FrameTracePreview
 DefaultGroupName=Frame Trace Preview
@@ -11,7 +11,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 OutputDir=artifacts\preview
-OutputBaseFilename=FrameTracePreview-0.7.13-Setup
+OutputBaseFilename=FrameTracePreview-0.7.14-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -25,7 +25,7 @@ RestartApplications=no
 LicenseFile=LICENSE
 
 [Files]
-Source: "artifacts\preview-0.7.13\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "artifacts\preview-0.7.14\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked

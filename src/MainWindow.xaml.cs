@@ -60,8 +60,8 @@ public partial class MainWindow : Window
     private int target, retries;
 
     private bool captureRestartRequested;
-    private bool updateCheckRunning;
-    private Uri? releaseUri;
+
+
 
     private long nextCaptureDiagnostic;
 
@@ -473,81 +473,6 @@ public partial class MainWindow : Window
 
     private void OpenSensorDriver(object sender, RoutedEventArgs e) => Process.Start(new ProcessStartInfo("https://pawnio.eu") { UseShellExecute = true });
 
-    private async void CheckForUpdates(object sender, RoutedEventArgs e) => await CheckForUpdatesAsync();
-
-    private async Task CheckForUpdatesAsync()
-    {
-        if (updateCheckRunning) return;
-        updateCheckRunning = true;
-        CheckForUpdatesButton.IsEnabled = false;
-        UpdateCheckStatus.Text = "Checking GitHub for the latest stable release…";
-        try
-        {
-            Version currentVersion = typeof(App).Assembly.GetName().Version
-                ?? throw new InvalidDataException("The installed Frame Trace version is missing.");
-            UpdateCheckResult result = await UpdateChecker.CheckAsync(currentVersion, shutdown.Token);
-            if (result.Availability == UpdateAvailability.Available)
-            {
-                Version latestVersion = result.LatestVersion ?? throw new InvalidDataException("The release version is missing.");
-                releaseUri = result.ReleaseUri ?? throw new InvalidDataException("The release page address is missing.");
-                UpdateCheckStatus.Text = $"Version {latestVersion.ToString(3)} is available.";
-                UpdateBannerText.Text = $"Frame Trace {latestVersion.ToString(3)} is available. Open the release page to see the download.";
-                UpdateBanner.Visibility = Visibility.Visible;
-            }
-            else if (result.Availability == UpdateAvailability.UpToDate)
-            {
-                releaseUri = null;
-                UpdateCheckStatus.Text = $"You're up to date · v{currentVersion.ToString(3)}.";
-                UpdateBanner.Visibility = Visibility.Collapsed;
-            }
-            else
-            {
-                releaseUri = null;
-                UpdateCheckStatus.Text = "No public release is available yet.";
-                UpdateBanner.Visibility = Visibility.Collapsed;
-            }
-        }
-        catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { }
-        catch (HttpRequestException error)
-        {
-            UpdateCheckStatus.Text = "Update check failed: " + error.Message;
-            UpdateBanner.Visibility = Visibility.Collapsed;
-            Diagnostics.Write("update-check-failed", error.ToString());
-        }
-        catch (TaskCanceledException error) when (!shutdown.IsCancellationRequested)
-        {
-            UpdateCheckStatus.Text = "Update check timed out. Check your connection and try again.";
-            UpdateBanner.Visibility = Visibility.Collapsed;
-            Diagnostics.Write("update-check-timeout", error.ToString());
-        }
-        catch (JsonException error)
-        {
-            UpdateCheckStatus.Text = "GitHub returned an unreadable release response.";
-            UpdateBanner.Visibility = Visibility.Collapsed;
-            Diagnostics.Write("update-check-invalid-response", error.ToString());
-        }
-        catch (InvalidDataException error)
-        {
-            UpdateCheckStatus.Text = error.Message;
-            UpdateBanner.Visibility = Visibility.Collapsed;
-            Diagnostics.Write("update-check-invalid-release", error.ToString());
-        }
-        finally
-        {
-            updateCheckRunning = false;
-            CheckForUpdatesButton.IsEnabled = true;
-        }
-    }
-
-    private void OpenUpdatePage(object sender, RoutedEventArgs e)
-    {
-        if (releaseUri is null) return;
-        try { Process.Start(new ProcessStartInfo(releaseUri.AbsoluteUri) { UseShellExecute = true }); }
-        catch (Win32Exception error) { Report("Could not open the GitHub release page", error); }
-    }
-
-    private void DismissUpdateBanner(object sender, RoutedEventArgs e) => UpdateBanner.Visibility = Visibility.Collapsed;
-
     private void RestartElevated(object sender, RoutedEventArgs e)
 
     {
@@ -598,7 +523,7 @@ public partial class MainWindow : Window
 
         e.Cancel = true; if (closing) return; closing = true; shutdown.Cancel();
 
-        try { await monitoring; if (sensorRead is not null) await sensorRead; if (capture is not null) await capture.DisposeAsync(); }
+        try { await WaitForUpdateDownloadAsync(); await monitoring; if (sensorRead is not null) await sensorRead; if (capture is not null) await capture.DisposeAsync(); }
 
         catch (Exception error) { Report("Capture shutdown failed", error); }
 

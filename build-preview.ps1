@@ -3,7 +3,7 @@
 param()
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
-$publishDirectory = Join-Path $projectRoot 'artifacts/preview-0.7.13'
+$publishDirectory = Join-Path $projectRoot 'artifacts/preview-0.7.14'
 $installerScript = Join-Path $projectRoot 'installer-preview.iss'
 $desktopReleases = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Frame Trace'
 
@@ -18,6 +18,6 @@ if (-not (Test-Path -LiteralPath $compiler)) { throw "Install Inno Setup 6 to bu
 if ($LASTEXITCODE -ne 0) { throw "Preview installer build failed with exit code $LASTEXITCODE." }
 
 New-Item -ItemType Directory -Path $desktopReleases -Force | Out-Null
-$installer = Join-Path $projectRoot 'artifacts/preview/FrameTracePreview-0.7.13-Setup.exe'
+$installer = Join-Path $projectRoot 'artifacts/preview/FrameTracePreview-0.7.14-Setup.exe'
 Copy-Item -LiteralPath $installer -Destination $desktopReleases
-Write-Output "Preview installer copied to $(Join-Path $desktopReleases 'FrameTracePreview-0.7.13-Setup.exe')"
+Write-Output "Preview installer copied to $(Join-Path $desktopReleases 'FrameTracePreview-0.7.14-Setup.exe')"

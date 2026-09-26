@@ -18,7 +18,7 @@
 
 ## Get Frame Trace
 
-Download the Windows x64 installer from [Releases](https://github.com/itourboy-OG/FrameTrace/releases/latest). Frame Trace checks for newer stable releases when it opens (optional) and from **Settings → Check now**. When an update is available, the app shows a banner linking to the release page. It never installs an update without you.
+Download the Windows x64 installer from [Releases](https://github.com/itourboy-OG/FrameTrace/releases/latest). Frame Trace checks for newer stable releases when it opens (optional) and from **Settings → Check now**. A compact notice offers **Update now** or **Not now**. Update now downloads the installer with percentage progress, verifies its size and SHA-256 against GitHub's release metadata, and opens Windows Setup to finish updating. Frame Trace closes cleanly before installation. Not now dismisses the notice without downloading. Updates never start without your choice.
 
 The installer is unsigned in this early release, so Windows may show a SmartScreen warning. Review the source and release details before installing.
 
@@ -29,7 +29,7 @@ The installer is unsigned in this early release, so Windows may show a SmartScre
 - **Hardware readings:** GPU load, temperature, power, clock, and VRAM; CPU load, temperature, and power where the sensor driver exposes them; physical RAM used.
 - **Overlay Studio:** drag or group-select items, add separate metrics, rename labels, adjust colors, fonts, sizes, layout, graph dimensions, and opacity. Match the canvas to your monitor, use the grid and snapping, save or delete named presets, and test edits live. An unsaved-edits indicator and confirmation protect edits before loading another preset, importing a layout, or resetting it.
 - **Settings:** customize the overlay shortcut and startup state, launch at Windows sign-in, start minimized, reduce background motion, ignore selected processes, adjust sensor polling, and choose whether to check for updates on startup.
-- **Update notice:** checks the public GitHub Releases API and links to the newest stable release. It does not upload performance readings or install software.
+- **Updates:** checks the public GitHub Releases API, offers an optional installer download with percentage progress and checksum verification, and starts Windows Setup after you choose Update now. Failed or canceled downloads are not installed. It does not upload performance readings.
 
 The Windows smoke suite passes locally, including real PresentMon capture, sensor reads, settings persistence, process selection, the Overlay Studio, and its five layouts. That does not establish compatibility with every PC or game.
 
@@ -46,6 +46,8 @@ The Windows smoke suite passes locally, including real PresentMon capture, senso
 
 Frame Trace stores preferences locally in `%LOCALAPPDATA%\FrameTrace`. On first startup after an upgrade, it renames the legacy `Frameglass` data folder, preserving preferences, custom presets, and diagnostics. If both folders exist, startup reports the conflict and leaves them unchanged. The update check makes a normal HTTPS request to GitHub for the latest public release; it sends the app's version in the request header and does not send hardware data, game names, or frame readings. Automatic checking can be disabled in Settings; **Check now** remains available.
 
+Installer downloads are saved under `%LOCALAPPDATA%\FrameTrace\Updates` only after you choose **Update now**. Their size and SHA-256 checksum are checked before Windows Setup is opened. Closing Frame Trace during a download cancels it and removes the partial file.
+
 Diagnostics are exported only when you choose **Export diagnostics**. Diagnostic files can include hardware readings, process names, and recent frame data. Review a file before sharing it.
 
 Overlay layout exports share overlay appearance and positions without sharing your hotkey, ignored-app list, Windows startup choice, or update preference. Importing a layout leaves those local settings unchanged.
@@ -56,7 +58,7 @@ Requirements: Windows 10 or later, .NET 9 SDK, and Inno Setup 6.
 
 ```powershell
 ./build.ps1
-./artifacts/app-0.7.13/FrameTrace.exe --smoke-test C:/path/to/test-results
+./artifacts/app-0.7.14/FrameTrace.exe --smoke-test C:/path/to/test-results
 ```
 
 The build creates a self-contained Windows x64 application and per-user installer. It downloads PresentMon 2.6.0 when needed and verifies its SHA-256 before packaging. The smoke test writes a `result.txt` report and screenshots; it uses real local sensors and ETW capture but does not validate every game or anti-cheat.

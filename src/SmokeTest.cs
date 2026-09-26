@@ -307,6 +307,75 @@ public static class SmokeTest
             Environment.ExitCode = 1;
         }
     }
+    public static async Task RunUpdateAsync(string outputDirectory)
+    {
+        Directory.CreateDirectory(outputDirectory);
+        MainWindow window = new(); Application.Current.MainWindow = window;
+        window.Show();
+        try
+        {
+            await Task.Delay(1500);
+            using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(3));
+            UpdateCheckResult result = await UpdateChecker.CheckAsync(new Version(0, 0, 0), timeout.Token);
+            Require(result.Availability == UpdateAvailability.Available && result.Installer is not null, "The real GitHub release has no verified installer.");
+            window.ShowAvailableUpdate(result);
+            await window.Dispatcher.InvokeAsync(() => window.UpdateLayout(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            Border banner = (Border)window.FindName("UpdateBanner");
+            Require(banner.ActualWidth <= 640 && banner.ActualWidth < window.ActualWidth - 200 && banner.ActualHeight <= 64, "The update notice is not compact.");
+            SaveImage(window, Path.Combine(outputDirectory, "update-available.png"));
+            FindButton(window, "DismissUpdateButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Require(banner.Visibility == Visibility.Collapsed, "Not now did not dismiss the update notice.");
+            Require(!Directory.Exists(Path.Combine(outputDirectory, "download")), "Dismissing created an installer download.");
+            window.ShowAvailableUpdate(result);
+            ProgressBar progress = (ProgressBar)window.FindName("UpdateDownloadProgress");
+            bool sawProgress = false;
+            progress.ValueChanged += (_, e) =>
+            {
+                if (sawProgress || e.NewValue < 8 || e.NewValue >= 100) return;
+                sawProgress = true;
+                window.UpdateLayout();
+                SaveImage(window, Path.Combine(outputDirectory, "update-downloading.png"));
+            };
+            string installer = await window.DownloadUpdateAsync(Path.Combine(outputDirectory, "download"), timeout.Token);
+            await window.Dispatcher.InvokeAsync(() => window.UpdateLayout(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            Require(sawProgress && progress.Value == 100, "A real installer download did not show percentage progress and completion.");
+            Require(!File.Exists(installer + ".part"), "A partial download remained after verification.");
+            await UpdateChecker.VerifyInstallerAsync(installer, result.Installer!, timeout.Token);
+            SaveImage(window, Path.Combine(outputDirectory, "update-verified.png"));
+            await using (FileStream altered = File.Open(installer, FileMode.Open, FileAccess.Write, FileShare.None))
+                altered.WriteByte(0);
+            try
+            {
+                await UpdateChecker.VerifyInstallerAsync(installer, result.Installer!, timeout.Token);
+                throw new InvalidOperationException("The updater accepted a modified installer.");
+            }
+            catch (InvalidDataException) { }
+            File.Delete(installer);
+            using CancellationTokenSource canceled = new();
+            string canceledDirectory = Path.Combine(outputDirectory, "canceled");
+            Progress<int> cancelProgress = new(percent => { if (percent >= 1) canceled.Cancel(); });
+            try
+            {
+                await UpdateChecker.DownloadAsync(result.Installer!, canceledDirectory, cancelProgress, canceled.Token);
+                throw new InvalidOperationException("The updater ignored download cancellation.");
+            }
+            catch (OperationCanceledException) { }
+            Require(!Directory.EnumerateFiles(canceledDirectory).Any(), "A canceled download left an installer or partial file behind.");
+            canceled.Cancel();
+            try { await window.DownloadUpdateAsync(Path.Combine(outputDirectory, "already-canceled"), canceled.Token); }
+            catch (OperationCanceledException) { }
+            Require(FindButton(window, "CheckForUpdatesButton").IsEnabled && FindButton(window, "InstallUpdateButton").IsEnabled, "Update controls were not restored after cancellation.");
+            Require((await UpdateChecker.CheckAsync(typeof(App).Assembly.GetName().Version!, timeout.Token)).Availability == UpdateAvailability.UpToDate, "The current app version was offered an older release.");
+            File.WriteAllText(Path.Combine(outputDirectory, "result.txt"), "PASS: real GitHub release and installer download, compact banner, Not now dismissal without downloading, percentage progress, SHA-256 verification, rejection of a modified installer, cancellation during streaming with partial-file cleanup, restored controls, and no downgrade offered. The installer was not executed.");
+        }
+        catch (Exception error)
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "result.txt"), "FAIL\n" + error);
+            Environment.ExitCode = 1;
+        }
+        finally { await CloseAsync(window); }
+    }
+
     public static async Task RunStudioAsync(string outputDirectory)
     {
         Directory.CreateDirectory(outputDirectory);
