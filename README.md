@@ -29,6 +29,7 @@ The installer is unsigned in this early release, so Windows may show a SmartScre
 - **Hardware readings:** GPU load, temperature, power, clock, and VRAM; CPU load, temperature, and power where the sensor driver exposes them; physical RAM used.
 - **Overlay Studio:** drag or group-select items, add separate metrics, rename labels, adjust colors, fonts, sizes, layout, graph dimensions, and opacity. Match the canvas to your monitor, use the grid and snapping, save or delete named presets, and test edits live. An unsaved-edits indicator and confirmation protect edits before loading another preset, importing a layout, or resetting it.
 - **Settings:** customize the overlay shortcut and startup state, launch at Windows sign-in, start minimized, reduce background motion, ignore selected processes, adjust sensor polling, and choose whether to check for updates on startup.
+- **Background work:** the decorative animation pauses when minimized or hidden. Capture and configured sensor polling continue, while hidden dashboard, studio, and overlay displays skip their refresh work. Visible graphs keep their real timestamps and stop requesting redraws when hidden or empty.
 - **Updates:** checks the public GitHub Releases API, offers an optional installer download with percentage progress and checksum verification, and starts Windows Setup after you choose Update now. Failed or canceled downloads are not installed. It does not upload performance readings.
 
 The Windows smoke suite passes locally, including real PresentMon capture, sensor reads, settings persistence, process selection, the Overlay Studio, and its five layouts. That does not establish compatibility with every PC or game.
@@ -58,13 +59,14 @@ Requirements: Windows 10 or later, .NET 9 SDK, and Inno Setup 6.
 
 ```powershell
 ./build.ps1
-./artifacts/app-0.7.14/FrameTrace.exe --smoke-test C:/path/to/test-results
+./artifacts/app-0.7.15/FrameTrace.exe --smoke-test C:/path/to/test-results
 ```
 
 The build creates a self-contained Windows x64 application and per-user installer. It downloads PresentMon 2.6.0 when needed and verifies its SHA-256 before packaging. The smoke test writes a `result.txt` report and screenshots; it uses real local sensors and ETW capture but does not validate every game or anti-cheat.
 
 ## Roadmap
 
+- Validate AFMF 2.1 gameplay after the performance changes, including displaying the overlay on a second monitor.
 - Test capture and overlay behavior across more games, graphics cards, drivers, and display modes.
 - Investigate a safe path for true exclusive-fullscreen overlays.
 - Explore reliable, cooperative reporting of in-game DLSS, FSR, XeSS, and frame-generation settings.

@@ -132,9 +132,8 @@ public static class FrameMetrics
 
         // ETW delivery can arrive in batches over 1.5 seconds apart. Expire chains at the same three-second boundary as the sample window.
 
-        FrameReading[] active = recent.GroupBy(frame => frame.SwapChain).Where(group => now - group.Max(frame => frame.ReceivedAt) < 3000)
-
-            .OrderByDescending(group => group.Count(frame => now - frame.ReceivedAt < 1500)).ThenByDescending(group => group.Max(frame => frame.ReceivedAt)).FirstOrDefault()?.ToArray() ?? [];
+        FrameReading[] active = recent.GroupBy(frame => frame.SwapChain)
+            .MaxBy(group => (group.Count(frame => now - frame.ReceivedAt < 1500), group.Max(frame => frame.ReceivedAt)))?.ToArray() ?? [];
 
         double[] times = active.Where(frame => frame.FrameType == "Application" && frame.FrameTime.HasValue).Select(frame => frame.FrameTime!.Value).ToArray();
 
@@ -147,10 +146,11 @@ public static class FrameMetrics
         FrameReading[] history = frames.Where(frame => frame.SwapChain == chain && frame.FrameType == "Application" && frame.FrameTime.HasValue && now - frame.ReceivedAt < 30000).ToArray();
 
         double[] historyTimes = history.Select(frame => frame.FrameTime!.Value).ToArray();
+        double? frameTime = times.Length > 1 ? times.Average() : null;
 
-        return new FrameSummary(times.Length > 1 ? 1000 / times.Average() : null, displayed.Length > 1 ? 1000 / displayed.Average() : null,
+        return new FrameSummary(frameTime.HasValue ? 1000 / frameTime.Value : null, displayed.Length > 1 ? 1000 / displayed.Average() : null,
 
-            times.Length > 1 ? times.Average() : null, generated.Length > 0 ? string.Join(" + ", generated.Select(TechnologyLabel)) : "Unavailable",
+            frameTime, generated.Length > 0 ? string.Join(" + ", generated.Select(TechnologyLabel)) : "Unavailable",
 
             active.LastOrDefault()?.PresentMode ?? "No fresh frames", times.TakeLast(180).ToImmutableArray())
 

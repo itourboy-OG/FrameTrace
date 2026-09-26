@@ -96,6 +96,31 @@ public static class SmokeTest
             window.AnimatedBackground.SetReducedMotion(!reduceMotion);
             Require(window.AnimatedBackground.ReducedMotion != reduceMotion && window.AnimatedBackground.IsAnimating == reduceMotion, "The background motion setting did not apply live.");
             window.AnimatedBackground.SetReducedMotion(reduceMotion);
+            window.AnimatedBackground.SetReducedMotion(false);
+            window.WindowState = WindowState.Minimized;
+            await Task.Delay(100);
+            double pausedPhase = window.AnimatedBackground.Phase;
+            Require(!window.AnimatedBackground.IsAnimating, "The background timer still runs while minimized.");
+            await Task.Delay(120);
+            Require(window.AnimatedBackground.Phase == pausedPhase, "Minimizing did not pause the animation clock.");
+            window.WindowState = WindowState.Normal; window.Activate();
+            Require(window.AnimatedBackground.IsAnimating, "The background animation did not resume after restoring.");
+            window.AppFps.Text = "paused dashboard";
+            window.WindowState = WindowState.Minimized;
+            await Task.Delay(250);
+            Require(window.AppFps.Text == "paused dashboard", "The minimized dashboard is still refreshing values.");
+            window.WindowState = WindowState.Normal; window.Activate();
+            Require(window.AppFps.Text != "paused dashboard", "Restoring did not refresh the dashboard immediately.");
+            window.Pages.SelectedIndex = 2;
+            window.AppFps.Text = "hidden dashboard";
+            await Task.Delay(250);
+            Require(window.AppFps.Text == "hidden dashboard", "The dashboard is still refreshing behind Settings.");
+            window.Pages.SelectedIndex = 0;
+            Require(window.AppFps.Text != "hidden dashboard", "Returning to the dashboard did not refresh its values.");
+            window.Hide();
+            Require(!window.AnimatedBackground.IsAnimating, "The background timer still runs while hidden.");
+            window.Show(); window.Activate();
+            window.AnimatedBackground.SetReducedMotion(reduceMotion);
             Size contentSize = ((FrameworkElement)window.Content).RenderSize;
             Require(window.AnimatedBackground.ActualWidth >= contentSize.Width - 2 && window.AnimatedBackground.ActualHeight >= contentSize.Height - 2, "The gaming background does not cover the application window.");
             Require(GamingBackground.PhaseAt(GamingBackground.LoopSeconds) == GamingBackground.PhaseAt(0) && GamingBackground.PhaseAt(GamingBackground.LoopSeconds - 0.001) > 0.999, "The background animation does not end on its starting frame.");
@@ -189,6 +214,7 @@ public static class SmokeTest
             Require(!CaptureSessions.Names().Contains(previousSession), "Restart capture leaked its previous Windows trace session.");
             title.BeginAnimation(UIElement.OpacityProperty, null);
             File.WriteAllText(Path.Combine(outputDirectory, "capture.json"), JsonSerializer.Serialize(captured));
+            await CheckGraphLifecycleAsync(captured.Points, outputDirectory);
             OverlayWindow overlay = new(Preferences.Initial);
             overlay.UpdateData(OverlayData.Build([], captured));
             DisplayInfo display = Desktop.Displays().Single(d => d.Primary);
@@ -307,6 +333,34 @@ public static class SmokeTest
             Environment.ExitCode = 1;
         }
     }
+    private static async Task CheckGraphLifecycleAsync(ImmutableArray<FramePoint> samples, string outputDirectory)
+    {
+        Require(!samples.IsEmpty, "Graph lifecycle testing requires real captured frame samples.");
+        FrameGraph graph = new();
+        Window host = new() { Title = "Frame Trace graph check", Width = 480, Height = 200, ShowActivated = false, Content = graph };
+        host.Show();
+        try
+        {
+            Require(!graph.IsAnimating, "An empty graph is still requesting redraws.");
+            graph.SetSamples(samples);
+            Require(graph.IsAnimating, "A visible graph with real frames did not start drawing.");
+            await Task.Delay(100);
+            SaveImage(host, Path.Combine(outputDirectory, "frame-graph.png"));
+            host.WindowState = WindowState.Minimized;
+            Require(!graph.IsAnimating, "The graph is still subscribed to rendering while minimized.");
+            host.WindowState = WindowState.Normal;
+            Require(graph.IsAnimating, "The graph did not resume after restoring.");
+            graph.Visibility = Visibility.Collapsed;
+            Require(!graph.IsAnimating, "A hidden graph is still requesting redraws.");
+            graph.Visibility = Visibility.Visible;
+            Require(graph.IsAnimating, "The graph did not resume after becoming visible.");
+            graph.SetSamples([]);
+            Require(!graph.IsAnimating, "The graph did not stop redrawing when samples were cleared.");
+        }
+        finally { host.Close(); }
+        Require(!graph.IsAnimating, "Closing the graph window left a rendering subscription active.");
+    }
+
     public static async Task RunUpdateAsync(string outputDirectory)
     {
         Directory.CreateDirectory(outputDirectory);

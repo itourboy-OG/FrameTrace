@@ -20,7 +20,7 @@ if (-not (Test-Path -LiteralPath $presentMon)) {
 if ((Get-FileHash -LiteralPath $presentMon -Algorithm SHA256).Hash -ne $expectedHash) {
     throw 'PresentMon SHA-256 mismatch. Verify vendor/PresentMon.exe against the official v2.6.0 release before building.'
 }
-$publishDirectory = Join-Path $projectRoot 'artifacts/app-0.7.14'
+$publishDirectory = Join-Path $projectRoot 'artifacts/app-0.7.15'
 dotnet publish (Join-Path $projectRoot 'src/Frameglass.csproj') -c Release -r win-x64 --self-contained true -o $publishDirectory --nologo
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE." }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $publishDirectory
@@ -31,5 +31,5 @@ if (-not (Test-Path -LiteralPath $compiler)) { throw "Install Inno Setup 6 to bu
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE." }
 $desktopReleases = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Frame Trace'
 New-Item -ItemType Directory -Path $desktopReleases -Force | Out-Null
-Copy-Item -LiteralPath (Join-Path $projectRoot '../FrameTrace-0.7.14-Setup.exe') -Destination $desktopReleases
+Copy-Item -LiteralPath (Join-Path $projectRoot '../FrameTrace-0.7.15-Setup.exe') -Destination $desktopReleases
 Write-Output "Installer copied to $desktopReleases"

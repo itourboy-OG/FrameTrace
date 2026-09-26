@@ -133,6 +133,7 @@ public partial class MainWindow : Window
         };
 
         Closing += CloseAsync;
+        StateChanged += (_, _) => { if (ready && WindowState != WindowState.Minimized) RenderData(); };
 
     }
 
@@ -220,7 +221,7 @@ public partial class MainWindow : Window
                         summary = capture.ReadSummary(target);
                         GameName.Text = "Frame Trace · Overlay test";
                         CaptureState.Text = "Live test · Frame Trace presentation FPS, not a game benchmark";
-                        if (enabled && DisplaySelector.SelectedItem is DisplayInfo testDisplay) overlay?.ShowOnMonitor(testDisplay.Bounds);
+                        if (enabled && DisplaySelector.SelectedItem is DisplayInfo testDisplay) ShowLiveOverlay(testDisplay.Bounds);
                         else overlay?.Hide();
                     }
                     else
@@ -279,7 +280,7 @@ public partial class MainWindow : Window
                     if (enabled && candidate is not null && foreground?.ProcessId == candidate.ProcessId && (summary.AppFps.HasValue || summary.DisplayFps.HasValue))
                     {
                         Rect? selectedDisplay = (DisplaySelector.SelectedItem as DisplayInfo)?.Bounds;
-                        overlay?.ShowOnMonitor(SelectOverlayMonitor(foreground!.Monitor, FollowDisplay.IsChecked == true, selectedDisplay));
+                        ShowLiveOverlay(SelectOverlayMonitor(foreground!.Monitor, FollowDisplay.IsChecked == true, selectedDisplay));
                     }
 
                     else overlay?.Hide();
@@ -325,15 +326,22 @@ public partial class MainWindow : Window
 
     }
 
+    private void ShowLiveOverlay(Rect bounds)
+    {
+        overlay?.UpdateData(OverlayData.Build(readings, summary));
+        overlay?.Surface.UpdateGraph(summary.Points);
+        overlay?.ShowOnMonitor(bounds);
+    }
+
     private void RenderData()
 
     {
 
+        if (!IsVisible || WindowState == WindowState.Minimized) return;
+        OverlayButton.Content = enabled ? "Overlay on" : "Overlay off";
+        if (Pages.SelectedIndex == 2) return;
         ImmutableArray<OverlaySectionData> data = OverlayData.Build(readings, summary);
-
-        overlay?.UpdateData(data); overlay?.Surface.UpdateGraph(summary.Points);
-
-        if (Pages.SelectedIndex == 1) { preview.UpdateData(data); preview.UpdateGraph(summary.Points); }
+        if (Pages.SelectedIndex == 1) { preview.UpdateData(data); preview.UpdateGraph(summary.Points); return; }
 
         AppFps.Text = summary.AppFps?.ToString("0") ?? "—"; DisplayFps.Text = summary.DisplayFps?.ToString("0") ?? "—";
 
@@ -364,7 +372,7 @@ public partial class MainWindow : Window
 
         }
 
-        Chart.SetSamples(summary.Points); OverlayButton.Content = enabled ? "Overlay on" : "Overlay off";
+        Chart.SetSamples(summary.Points);
 
     }
 
@@ -465,7 +473,7 @@ public partial class MainWindow : Window
         draft = draft with { Sections = Preferences.Initial.Sections }; LoadControls();
     }
 
-    private void PageChanged(object sender, SelectionChangedEventArgs e) { if (ready && e.Source == Pages) preview.UpdateData(OverlayData.Build(readings, summary)); }
+    private void PageChanged(object sender, SelectionChangedEventArgs e) { if (ready && e.Source == Pages) RenderData(); }
 
     private void ToggleOverlay(object sender, RoutedEventArgs e) { enabled = !enabled; if (!enabled) overlay?.Hide(); OverlayButton.Content = enabled ? "Overlay on" : "Overlay off"; }
 

@@ -173,29 +173,45 @@ public sealed partial class OverlayCanvas : Canvas
             panel.Child = contents;
         }
         UpdateData(data);
+        PositionPanels();
         UpdateSelectionOutlines();
     }
     public void UpdateData(ImmutableArray<OverlaySectionData> value)
     {
         data = value;
         if (dragging is not null) return;
+        bool resized = false;
         foreach (SectionStyle style in preferences.Sections)
         {
             OverlaySectionData section = data.Single(d => d.Kind == style.Kind);
-            titles[style.Key].Text = string.IsNullOrWhiteSpace(style.Name) ? section.Name : style.Name;
+            Border panel = panels[style.Key];
+            bool changed = false;
+            string title = string.IsNullOrWhiteSpace(style.Name) ? section.Name : style.Name;
+            if (titles[style.Key].Text != title) { titles[style.Key].Text = title; changed = true; }
             foreach (string id in style.Metrics)
             {
                 MetricValue metric = section.Metrics.Single(m => m.Id == id);
-                string label = style.Labels.TryGetValue(id, out string? custom) ? custom : metric.Label;
+                Visibility visibility = preferences.HideUnknownTechnology && !editing && !metric.Available ? Visibility.Collapsed : Visibility.Visible;
                 foreach (FrameworkElement element in metricElements[(style.Key, id)])
-                    element.Visibility = preferences.HideUnknownTechnology && !editing && !metric.Available ? Visibility.Collapsed : Visibility.Visible;
-                if (style.Layout == MetricLayout.Flow) flowValues[(style.Key, id)].Text = metric.Text;
-                else values[(style.Key, id)].Text = metric.Text;
+                    if (element.Visibility != visibility) { element.Visibility = visibility; changed = true; }
+                if (style.Layout == MetricLayout.Flow)
+                {
+                    Run reading = flowValues[(style.Key, id)];
+                    if (reading.Text != metric.Text) { reading.Text = metric.Text; changed = true; }
+                }
+                else if (values[(style.Key, id)].Text != metric.Text) { values[(style.Key, id)].Text = metric.Text; changed = true; }
             }
-            panels[style.Key].Visibility = style.Visible && (style.ShowName || style.Graph || style.Metrics.Any(id => editing || !preferences.HideUnknownTechnology || section.Metrics.Single(metric => metric.Id == id).Available)) ? Visibility.Visible : Visibility.Collapsed;
-            panels[style.Key].Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            Visibility panelVisibility = style.Visible && (style.ShowName || style.Graph || style.Metrics.Any(id => editing || !preferences.HideUnknownTechnology || section.Metrics.Single(metric => metric.Id == id).Available)) ? Visibility.Visible : Visibility.Collapsed;
+            if (panel.Visibility != panelVisibility) { panel.Visibility = panelVisibility; changed = true; }
+            if (changed || !panel.IsMeasureValid)
+            {
+                Size previous = panel.DesiredSize;
+                if (changed) panel.InvalidateMeasure();
+                panel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                resized |= previous != panel.DesiredSize;
+            }
         }
-        PositionPanels(); UpdateSelectionOutlines();
+        if (resized) { PositionPanels(); UpdateSelectionOutlines(); }
     }
     public void UpdateGraph(ImmutableArray<FramePoint> samples)
     {
@@ -363,7 +379,8 @@ public sealed class OverlayWindow : Window
         if (display is null) return;
         Rect content = Surface.VisibleBounds();
         if (content.IsEmpty) { Hide(); return; }
-        Surface.RenderTransform = new TranslateTransform(-content.X, -content.Y);
+        if (Surface.RenderTransform is not TranslateTransform translation || translation.X != -content.X || translation.Y != -content.Y)
+            Surface.RenderTransform = new TranslateTransform(-content.X, -content.Y);
         Rect screen = new(display.Bounds.X + content.X * display.Scale, display.Bounds.Y + content.Y * display.Scale, Math.Ceiling(content.Width * display.Scale), Math.Ceiling(content.Height * display.Scale));
         if (placed != screen) { Desktop.PlaceOverlay(this, screen); placed = screen; }
     }

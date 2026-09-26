@@ -31,6 +31,7 @@ internal sealed class GamingBackground : FrameworkElement
     private readonly Stopwatch clock = new();
     private readonly DispatcherTimer timer = new(DispatcherPriority.Render);
     private bool reducedMotion;
+    private Window? owner;
 
     public GamingBackground()
     {
@@ -39,10 +40,16 @@ internal sealed class GamingBackground : FrameworkElement
         timer.Tick += (_, _) => InvalidateVisual();
         Loaded += (_, _) =>
         {
-            clock.Start();
-            if (!reducedMotion) timer.Start();
+            owner = Window.GetWindow(this) ?? throw new InvalidOperationException("The gaming background needs a window host.");
+            owner.StateChanged += WindowStateChanged;
+            owner.IsVisibleChanged += WindowVisibilityChanged;
+            RefreshAnimation();
         };
-        Unloaded += (_, _) => timer.Stop();
+        Unloaded += (_, _) =>
+        {
+            timer.Stop(); clock.Stop();
+            if (owner is not null) { owner.StateChanged -= WindowStateChanged; owner.IsVisibleChanged -= WindowVisibilityChanged; owner = null; }
+        };
     }
 
     internal bool IsAnimating => timer.IsEnabled;
@@ -52,11 +59,16 @@ internal sealed class GamingBackground : FrameworkElement
     internal void SetReducedMotion(bool enabled)
     {
         reducedMotion = enabled;
-        if (IsLoaded)
-        {
-            if (enabled) timer.Stop(); else timer.Start();
-            InvalidateVisual();
-        }
+        RefreshAnimation();
+        InvalidateVisual();
+    }
+
+    private void WindowStateChanged(object? sender, EventArgs e) => RefreshAnimation();
+    private void WindowVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e) => RefreshAnimation();
+    private void RefreshAnimation()
+    {
+        if (IsLoaded && !reducedMotion && owner is { IsVisible: true, WindowState: not WindowState.Minimized }) { clock.Start(); timer.Start(); }
+        else { timer.Stop(); clock.Stop(); }
     }
 
     protected override void OnRender(DrawingContext context)
