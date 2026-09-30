@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -39,24 +40,42 @@ public partial class MainWindow
     private readonly ComboBox graphPicker = new() { DisplayMemberPath = "Name", MaxDropDownHeight = 240, Visibility = Visibility.Collapsed };
     private readonly Button addGraphButton = new() { Content = "Add selected live graph or bar", Margin = new Thickness(0, 7, 0, 8), Visibility = Visibility.Collapsed };
 
+    private void PrepareArtworkPreview(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ComboBoxItem item) throw new ArgumentException("RTSS artwork preview requires a dropdown item.", nameof(sender));
+        (string name, BitmapSource image) = item.Content switch
+        {
+            RtssSprite sprite => (sprite.Name, sprite.Preview),
+            RtssAnimation animation => (animation.Name, animation.Preview),
+            _ => throw new InvalidDataException("RTSS artwork dropdown contains an unsupported item.")
+        };
+        StackPanel preview = new() { MaxWidth = 300 };
+        preview.Children.Add(new TextBlock { Text = name, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
+        preview.Children.Add(new Image { Source = image, MaxWidth = 280, MaxHeight = 200, Stretch = Stretch.Uniform });
+        item.ToolTip = preview;
+        ToolTipService.SetPlacement(item, PlacementMode.Right);
+        ToolTipService.SetHorizontalOffset(item, 8);
+    }
+
     private void InitializeArtworkTools()
     {
         StudioArtworkTab.Visibility = Visibility.Visible;
         artworkOptions.Children.Add(new TextBlock { Text = "SELECTED ARTWORK SIZE", Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 0, 0, 6) });
         artworkOptions.Children.Add(artworkSizeText);
-        artworkOptions.Children.Add(new TextBlock { Text = "Width", Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 8, 0, 3) });
+        artworkOptions.Children.Add(new TextBlock { Text = "Width", Foreground = Brushes.LightSlateGray, ToolTip = "Set the selected image or animation width in pixels.", Margin = new Thickness(0, 8, 0, 3) });
         artworkOptions.Children.Add(artworkWidth);
-        artworkOptions.Children.Add(new TextBlock { Text = "Height", Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 8, 0, 3) });
+        artworkOptions.Children.Add(new TextBlock { Text = "Height", Foreground = Brushes.LightSlateGray, ToolTip = "Set the selected image or animation height in pixels.", Margin = new Thickness(0, 8, 0, 3) });
         artworkOptions.Children.Add(artworkHeight);
-        artworkOptions.Children.Add(new TextBlock { Text = "Opacity", Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 8, 0, 3) });
+        artworkOptions.Children.Add(new TextBlock { Text = "Opacity", Foreground = Brushes.LightSlateGray, ToolTip = "Fade the selected artwork. Default: fully visible.", Margin = new Thickness(0, 8, 0, 3) });
         artworkOptions.Children.Add(artworkOpacity);
-        radiusOptions.Children.Add(new TextBlock { Text = "Corner rounding", Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 8, 0, 3) });
+        radiusOptions.Children.Add(new TextBlock { Text = "Corner rounding", Foreground = Brushes.LightSlateGray, ToolTip = "Round the corners of the selected color panel. Default: square corners.", Margin = new Thickness(0, 8, 0, 3) });
         radiusOptions.Children.Add(artworkRadius);
         artworkOptions.Children.Add(radiusOptions);
         animationOptions.Children.Add(new TextBlock { Text = "Animation playback", Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 12, 0, 5) });
         foreach (string label in new[] { "Loop continuously", "Follow GPU fan speed", "Follow GPU usage", "Follow CPU usage", "Follow RAM usage", "GPU temperature alarm", "CPU temperature alarm" })
             animationPlayback.Items.Add(new ComboBoxItem { Content = label });
         animationPlayback.SetResourceReference(StyleProperty, "CaptureTargetStyle");
+        animationPlayback.ToolTip = "Choose whether frames loop, follow a live reading, or act as a temperature alarm.";
         AutomationProperties.SetAutomationId(animationPlayback, "ArtworkPlayback");
         animationPlayback.SelectionChanged += EditSection;
         animationOptions.Children.Add(animationPlayback);
@@ -67,6 +86,7 @@ public partial class MainWindow
         animationSpeed.ValueChanged += EditSection;
         animationSpeed.ValueChanged += (_, _) => animationSpeedLabel.Text = $"Loop frame interval · {animationSpeed.Value:0} ms";
         animationSpeed.ToolTip = "Time between animation frames. Default: 250 ms. Double-click to reset.";
+        animationSpeedLabel.ToolTip = animationSpeed.ToolTip;
         animationSpeed.PreviewMouseDoubleClick += (_, e) => { animationSpeed.Value = 250; e.Handled = true; };
         alarmThresholdOptions.Children.Add(alarmThresholdLabel);
         alarmThresholdOptions.Children.Add(alarmThreshold);
@@ -74,11 +94,16 @@ public partial class MainWindow
         AutomationProperties.SetAutomationId(alarmThreshold, "AlarmTemperatureThreshold");
         alarmThreshold.ValueChanged += EditSection;
         alarmThreshold.ValueChanged += (_, _) => alarmThresholdLabel.Text = $"Turn red at {alarmThreshold.Value:0}°C";
+        alarmThreshold.ToolTip = "Temperature that turns the alarm red. Default: 85°C for CPU, 70°C for GPU. Double-click to reset.";
+        alarmThresholdLabel.ToolTip = alarmThreshold.ToolTip;
+        alarmThreshold.PreviewMouseDoubleClick += (_, e) => { alarmThreshold.Value = Selected.AnimationSource == ArtworkAnimationSource.CpuTemperatureAlarm ? 85 : 70; e.Handled = true; };
         artworkOptions.Children.Add(animationOptions);
         artworkWidth.ValueChanged += EditSection;
         artworkHeight.ValueChanged += EditSection;
         artworkOpacity.ValueChanged += EditSection;
         artworkRadius.ValueChanged += EditSection;
+        artworkWidth.ToolTip = "Selected artwork width in pixels. Its original size depends on the imported image.";
+        artworkHeight.ToolTip = "Selected artwork height in pixels. Its original size depends on the imported image.";
         artworkOpacity.ToolTip = "Artwork opacity. Default: 100%. Double-click to reset.";
         artworkOpacity.PreviewMouseDoubleClick += (_, e) => { artworkOpacity.Value = 1; e.Handled = true; };
         artworkRadius.ToolTip = "Artwork corner rounding. Default: 0 pixels. Double-click to reset.";
@@ -93,6 +118,7 @@ public partial class MainWindow
         };
         spritePicker.SetResourceReference(StyleProperty, "CaptureTargetStyle");
         spritePicker.ItemTemplate = (DataTemplate)FindResource("RtssArtworkChoice");
+        spritePicker.ItemContainerStyle = (Style)FindResource("RtssArtworkItemStyle");
         AutomationProperties.SetAutomationId(spritePicker, "RtssSpriteSelector");
         spritePicker.SelectionChanged += (_, _) =>
         {
@@ -115,6 +141,7 @@ public partial class MainWindow
             addSpriteButton.IsEnabled = spritePicker.SelectedItem is RtssSprite or RtssAnimation;
         };
         graphPicker.SetResourceReference(StyleProperty, "CaptureTargetStyle");
+        graphPicker.ToolTip = "Choose a live graph or usage bar from the imported skin.";
         AutomationProperties.SetAutomationId(graphPicker, "RtssGraphSelector");
         AutomationProperties.SetAutomationId(addGraphButton, "AddRtssGraph");
         graphPicker.SelectionChanged += (_, _) => addGraphButton.IsEnabled = graphPicker.SelectedItem is RtssLiveGraph or RtssLiveBar;
@@ -125,17 +152,17 @@ public partial class MainWindow
     {
         ArtworkTools.Children.Add(new TextBlock { Text = "FREEFORM LAYERS", Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 14, 0, 7) });
         StackPanel order = new() { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
-        Button backward = new() { Content = "Send backward" };
-        Button forward = new() { Content = "Bring forward", Margin = new Thickness(7, 0, 0, 0) };
+        Button backward = new() { Content = "Send backward", ToolTip = "Move the selected layer behind the next layer." };
+        Button forward = new() { Content = "Bring forward", ToolTip = "Move the selected layer in front of the next layer.", Margin = new Thickness(7, 0, 0, 0) };
         AutomationProperties.SetAutomationId(backward, "LayerBackward");
         AutomationProperties.SetAutomationId(forward, "LayerForward");
         backward.Click += (_, _) => MoveLayer(-1);
         forward.Click += (_, _) => MoveLayer(1);
         order.Children.Add(backward); order.Children.Add(forward); ArtworkTools.Children.Add(order);
-        Button text = new() { Content = "Add text layer", Margin = new Thickness(0, 0, 0, 6) };
-        Button game = new() { Content = "Add game info · icon + present API", Margin = new Thickness(0, 0, 0, 6) };
-        Button panel = new() { Content = "Add color panel", Margin = new Thickness(0, 0, 0, 6) };
-        Button png = new() { Content = "Add PNG layer", Margin = new Thickness(0, 0, 0, 14) };
+        Button text = new() { Content = "Add text layer", ToolTip = "Place a movable caption on the overlay.", Margin = new Thickness(0, 0, 0, 6) };
+        Button game = new() { Content = "Add game info · icon + present API", ToolTip = "Show the captured game's icon, name, and reported graphics API.", Margin = new Thickness(0, 0, 0, 6) };
+        Button panel = new() { Content = "Add color panel", ToolTip = "Place a resizable background shape behind other items.", Margin = new Thickness(0, 0, 0, 6) };
+        Button png = new() { Content = "Add PNG layer", ToolTip = "Choose a PNG image to place on the overlay.", Margin = new Thickness(0, 0, 0, 14) };
         Button load = new() { Content = "Open RTSS skin (.ovl)", Margin = new Thickness(0, 0, 0, 7), ToolTip = "Read artwork, animations, and supported live graphs from an RTSS skin." };
         placeRtssLayoutButton.ToolTip = "Place supported skin layers together. Check alignment on the canvas before saving.";
         addSpriteButton.ToolTip = "Add the selected image or animation as a movable layer.";
