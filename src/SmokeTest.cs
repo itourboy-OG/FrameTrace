@@ -25,6 +25,38 @@ public static class SmokeTest
             Require(skin.Animations.Length == 7, "The supplied RTSS sprite animations and temperature alarms were not recognized.");
             Require(skin.LiveGraphs.Length == 4, "The supplied RTSS frame-time and hardware-load graphs were not recognized.");
             Require(skin.LiveBars.Length == 5, "The supplied RTSS usage and temperature bars were not recognized.");
+            Require(skin.Layout is { TotalLayers: 79 } && skin.Layout.Placements.Length > 30, "The RTSS skin layer positions were not read.");
+            RtssLayoutResult placedSkin = RtssLayout.Build(skin, new Size(3440, 1440));
+            File.WriteAllLines(Path.Combine(outputDirectory, "rtss-positions.txt"), placedSkin.Sections.Select(item => $"{item.Name}: {item.X * (3440 - item.ImageWidth):0.#}, {item.Y * (1440 - item.ImageHeight):0.#} · {item.ImageWidth:0.#} × {item.ImageHeight:0.#}"));
+            Require(placedSkin.PlacedLayers > 60 && placedSkin.Sections.Length <= Preferences.MaxOverlayItems, "The RTSS skin did not place its artwork and live text on the canvas.");
+            Require(placedSkin.Sections.Any(item => item.RtssTextSource == RtssTextSource.FrameRate) && placedSkin.Sections.Any(item => item.RtssTextSource == RtssTextSource.GpuTemperature), "The RTSS live FPS and GPU text fields were not placed.");
+            Require(placedSkin.Sections.Single(item => item.Name == "FPS  Img_BigIco").Y < placedSkin.Sections.Single(item => item.Name == "GPU  Img_BigIco").Y,
+                "The RTSS FPS and GPU layers lost their original vertical order.");
+            Require(placedSkin.Sections.Single(item => item.Name == "FPS  Banner_head").X > placedSkin.Sections.Single(item => item.Name == "FPS  Img_BigIco").X,
+                "The RTSS banner head lost its right-aligned extent position.");
+            Require(placedSkin.Sections.Where(item => item.Graph).All(item => item.GraphTransparent), "Imported RTSS graphs need transparent backgrounds.");
+            Preferences placedPreferences = Preferences.Validate(Preferences.Initial with { OverlayScale = 1, Sections = placedSkin.Sections });
+            Require(Preferences.Parse(JsonSerializer.Serialize(placedPreferences)).Sections.Length == placedSkin.Sections.Length, "The imported RTSS layout did not survive save and reload.");
+            OverlayCanvas placedCanvas = new() { Width = 3440, Height = 1440 };
+            placedCanvas.Apply(placedPreferences);
+            placedCanvas.UpdateGameInfo("PEAK.exe", "D3D11", null);
+            placedCanvas.UpdateData(OverlayData.Build([
+                new("Radeon RX 9600 XT", "GpuAmd", "GPU Core", "Load", 99, "%"),
+                new("Radeon RX 9600 XT", "GpuAmd", "GPU Core", "Temperature", 63, "°C"),
+                new("Radeon RX 9600 XT", "GpuAmd", "GPU Package", "Power", 130, "W"),
+                new("Radeon RX 9600 XT", "GpuAmd", "GPU Core", "Clock", 2600, "MHz"),
+                new("Radeon RX 9600 XT", "GpuAmd", "GPU Memory Used", "SmallData", 6656, "MB"),
+                new("Ryzen 7 5800XT", "Cpu", "CPU Total", "Load", 43, "%"),
+                new("Ryzen 7 5800XT", "Cpu", "CPU Package", "Temperature", 72, "°C"),
+                new("Ryzen 7 5800XT", "Cpu", "CPU Package", "Power", 75, "W"),
+                new("Total Memory", "Memory", "Memory", "Load", 59, "%"),
+                new("Total Memory", "Memory", "Memory Used", "Data", 18874, "MB")
+            ], FrameMetrics.Summarize([], Environment.TickCount64) with { AppFps = 39, FrameTime = 25.6 }));
+            SectionStyle fpsText = placedSkin.Sections.Single(item => item.RtssTextSource == RtssTextSource.FrameRate);
+            TextBlock fpsReading = Descendants(placedCanvas).OfType<TextBlock>().Single(item => AutomationProperties.GetAutomationId(item) == "RtssText_" + fpsText.Key);
+            Require(fpsReading.Text.Contains("39", StringComparison.Ordinal) && fpsReading.Text.Contains("25.6 ms", StringComparison.Ordinal), "The imported FPS field did not follow live frame data.");
+            placedCanvas.Measure(new Size(3440, 1440)); placedCanvas.Arrange(new Rect(0, 0, 3440, 1440)); placedCanvas.UpdateLayout();
+            SavePresetImage(placedCanvas, Path.Combine(outputDirectory, "rtss-placed-layout.png"));
             RtssSprite background = skin.Sprites.Single(item => item.Name.Contains("Background_02", StringComparison.Ordinal));
             Require(background.Width == 280 && background.Height == 86 && background.Preview.PixelWidth == 280 && background.Preview.PixelHeight == 86 && skin.UnsupportedTables == 7, "The two-part RTSS background was not combined or empty tables were counted as missing artwork.");
             PngBitmapEncoder backgroundImage = new(); backgroundImage.Frames.Add(BitmapFrame.Create(background.Preview));
@@ -204,6 +236,14 @@ public static class SmokeTest
                 BitmapSource loopStart = (BitmapSource)loopingImage.Source;
                 await Task.Delay(650);
                 Require(!ReferenceEquals(loopStart, loopingImage.Source), "A sensor-driven RTSS sprite did not animate when changed to continuous playback.");
+                Preferences slowLayout = loopingLayout with { Sections = loopingLayout.Sections.Select(section => section.Key == loadAnimation.Key ? section with { AnimationIntervalMs = 1000 } : section).ToImmutableArray() };
+                canvas.Apply(Preferences.Validate(slowLayout));
+                Image slowImage = (Image)canvas.Children.OfType<Border>().Single(panel => (string)panel.Tag == loadAnimation.Key).Child;
+                BitmapSource slowStart = (BitmapSource)slowImage.Source;
+                await Task.Delay(400);
+                Require(ReferenceEquals(slowStart, slowImage.Source), "The loop speed control advanced a frame before its selected interval.");
+                await Task.Delay(750);
+                Require(!ReferenceEquals(slowStart, slowImage.Source), "The loop speed control did not advance after its selected interval.");
                 canvas.Apply(graphLayout with { ReduceMotion = true });
                 Image reducedImage = (Image)canvas.Children.OfType<Border>().Single(panel => (string)panel.Tag == animated.Key).Child;
                 BitmapSource reducedFrame = (BitmapSource)reducedImage.Source;
@@ -211,7 +251,7 @@ public static class SmokeTest
                 Require(ReferenceEquals(reducedFrame, reducedImage.Source), "Reduce motion did not pause the imported animation.");
             }
             finally { host.Close(); }
-            File.WriteAllText(Path.Combine(outputDirectory, "result.txt"), $"PASS: {skin.Sprites.Length} still images, {skin.Animations.Length} sprite animations, {skin.LiveGraphs.Length} live graphs, and {skin.LiveBars.Length} live bars loaded; {skin.UnsupportedTables} advanced tables left unconverted; portable layout round trip and visible layers verified.");
+            File.WriteAllText(Path.Combine(outputDirectory, "result.txt"), $"PASS: {skin.Sprites.Length} still images, {skin.Animations.Length} sprite animations, {skin.LiveGraphs.Length} live graphs, and {skin.LiveBars.Length} live bars loaded; {placedSkin.PlacedLayers} of {placedSkin.PlacedLayers + placedSkin.SkippedLayers} RTSS layers placed; {skin.UnsupportedTables} advanced tables left unconverted; portable layout round trip and visible layers verified.");
         }
         catch (Exception error)
         {
@@ -476,6 +516,21 @@ public static class SmokeTest
             Require(items.Items.Count == originalCount + 1 && !itemCanvas.Children.OfType<Border>().Any(panel => (string)panel.Tag == separate.Key), "Removing a separate metric left its renderer behind.");
             ((TabControl)window.FindName("StudioInspectorTabs")).SelectedItem = ((TabControl)window.FindName("StudioInspectorTabs")).Items.Cast<TabItem>().Single(tab => AutomationProperties.GetAutomationId(tab) == "StudioArtworkTab");
             window.UpdateLayout();
+            ComboBox artworkPicker = Descendants(window).OfType<ComboBox>().Single(picker => AutomationProperties.GetAutomationId(picker) == "RtssSpriteSelector");
+            TextBlock artworkChoice = (TextBlock)(artworkPicker.ItemTemplate ?? throw new InvalidOperationException("RTSS artwork has no preview template.")).LoadContent();
+            BitmapSource samplePreview = new WriteableBitmap(2, 2, 96, 96, PixelFormats.Bgra32, null);
+            artworkChoice.DataContext = new RtssSprite("Preview check", "", 2, 2, samplePreview);
+            ToolTip artworkTip = (ToolTip)artworkChoice.ToolTip;
+            artworkTip.PlacementTarget = artworkChoice;
+            artworkTip.IsOpen = true;
+            await window.Dispatcher.InvokeAsync(() => window.UpdateLayout(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            Image artworkImage = ((StackPanel)artworkTip.Content).Children.OfType<Image>().Single();
+            Require(artworkImage.Source == samplePreview, "Hovering over RTSS artwork did not bind its image preview.");
+            artworkTip.IsOpen = false;
+            Slider studioZoom = (Slider)window.FindName("ZoomSlider");
+            studioZoom.Value = 100;
+            studioZoom.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = Control.PreviewMouseDoubleClickEvent });
+            Require(studioZoom.Value < 100, "Double-clicking canvas zoom did not restore fit-to-canvas.");
             Descendants(window).OfType<Button>().Single(button => AutomationProperties.GetAutomationId(button) == "AddTextLayer").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             SectionStyle textLayer = (SectionStyle)items.SelectedItem;
             Require(textLayer.Kind == SectionKind.Artwork && textLayer.ImageData.Length == 0 && items.Items.Count == originalCount + 2, "A freeform text layer was not added.");
@@ -589,6 +644,9 @@ public static class SmokeTest
             await Task.Delay(150);
             Require(FindButton(window, "ReportProblemButton").IsVisible && FindButton(window, "SendFeedbackButton").IsVisible, "The feedback actions are missing from Settings.");
             SaveImage(window, Path.Combine(outputDirectory, "settings-bottom.png"));
+            ((TabControl)window.FindName("Pages")).SelectedIndex = 3;
+            await Task.Delay(150);
+            SaveImage(window, Path.Combine(outputDirectory, "about.png"));
             Preferences.Write(Preferences.Initial, Path.Combine(outputDirectory, "layout.json"));
             Require(Preferences.Parse(File.ReadAllText(Path.Combine(outputDirectory, "layout.json"))).Sections.Length == 4, "Layout round trip failed.");
             await CloseAsync(window); window = null;
@@ -708,6 +766,9 @@ public static class SmokeTest
             await Task.Delay(2000);
             ((TabControl)window.FindName("Pages")).SelectedIndex = 1;
             await Task.Delay(200);
+            ComboBox preset = (ComboBox)window.FindName("PresetSelector");
+            preset.SelectedItem = preset.Items.Cast<LayoutPresets.Choice>().Single(item => item.Name == "Classic RTSS");
+            FindButton(window, "ApplyPresetButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             CheckUsageBar(outputDirectory);
             CheckSignalPanels(outputDirectory);
             await CheckLiveEditingAsync(window, outputDirectory);

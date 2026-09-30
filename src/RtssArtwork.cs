@@ -26,7 +26,9 @@ public sealed record RtssLiveBar(string Name, int Width, int Height, ArtworkBarS
 {
     public override string ToString() => Name;
 }
-public sealed record RtssArtwork(ImmutableArray<RtssSprite> Sprites, ImmutableArray<RtssAnimation> Animations, ImmutableArray<RtssLiveGraph> LiveGraphs, ImmutableArray<RtssLiveBar> LiveBars, int UnsupportedTables);
+public sealed record RtssPlacement(string LayerName, string TableName, string Text, int X, int Y, int ExtentX, int ExtentY, int ExtentOrigin, int PrefixLines, int Size, string Color);
+public sealed record RtssLayoutInfo(string FontFace, int FontHeight, double ZoomRatio, ImmutableArray<RtssPlacement> Placements, int TotalLayers, int PartialLayers);
+public sealed record RtssArtwork(ImmutableArray<RtssSprite> Sprites, ImmutableArray<RtssAnimation> Animations, ImmutableArray<RtssLiveGraph> LiveGraphs, ImmutableArray<RtssLiveBar> LiveBars, int UnsupportedTables, RtssLayoutInfo? Layout);
 
 public static class RtssArtworkImporter
 {
@@ -34,6 +36,7 @@ public static class RtssArtworkImporter
     private static readonly Regex animationTag = new(@"<AI=(Timer_01|Timer_02|GPU1 usage|CPU usage|RAM usage percent),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),0>", RegexOptions.CultureInvariant);
     private static readonly Regex graphTag = new(@"<G=(Frametime|GPU1 usage|CPU usage|RAM usage percent),(\d+),(\d+),\d+,\d+,\d+,0>", RegexOptions.CultureInvariant);
     private static readonly Regex barTag = new(@"<G=(GPU1 usage|CPU usage|RAM usage percent|GPU1 temperature|CPU temperature),(\d+),(\d+),\d+,(-?\d+),(-?\d+),\d+>", RegexOptions.CultureInvariant);
+    private static readonly Regex tableTag = new(@"<TT=([^>]+)>", RegexOptions.CultureInvariant);
 
     public static RtssArtwork Read(string path)
     {
@@ -44,7 +47,8 @@ public static class RtssArtworkImporter
         string? tableName = null, tableImage = null, tableSecondLine = null, tableCell = null, tableGraph = null;
         int tableCount = 0, emptyTableCount = 0;
         ImmutableArray<(string Name, string Image, string SecondLine, string Cell, string Graph)>.Builder tables = ImmutableArray.CreateBuilder<(string, string, string, string, string)>();
-        foreach (string raw in File.ReadAllLines(path, Encoding.Latin1))
+        string[] lines = File.ReadAllLines(path, Encoding.Latin1);
+        foreach (string raw in lines)
         {
             string line = raw.Trim();
             if (line.StartsWith('['))
@@ -213,7 +217,89 @@ public static class RtssArtworkImporter
             animations.Add(new RtssAnimation("GPU temperature alarm · 70°C", frames, normalFlame.Width, normalFlame.Height, ArtworkAnimationSource.GpuTemperatureAlarm, 69, 70, normalFlame.Preview));
             animations.Add(new RtssAnimation("CPU temperature alarm · 85°C", frames, normalFlame.Width, normalFlame.Height, ArtworkAnimationSource.CpuTemperatureAlarm, 84, 85, normalFlame.Preview));
         }
-        return new RtssArtwork(sprites.ToImmutable(), animations.ToImmutable(), graphs.ToImmutable(), bars.ToImmutable(), tableCount - emptyTableCount - convertedTables);
+        return new RtssArtwork(sprites.ToImmutable(), animations.ToImmutable(), graphs.ToImmutable(), bars.ToImmutable(), tableCount - emptyTableCount - convertedTables, ReadLayout(lines));
+    }
+
+    private static RtssLayoutInfo? ReadLayout(string[] lines)
+    {
+        string section = "", fontFace = "";
+        int fontHeight = 0, totalLayers = 0, partialLayers = 0;
+        double zoomRatio = 1;
+        string? layerName = null, layerText = null;
+        int? x = null, y = null;
+        int extentX = 0, extentY = 0, extentOrigin = 0;
+        int size = 100;
+        string color = "FFFFFF";
+        bool sticky = false;
+        ImmutableArray<RtssPlacement>.Builder placements = ImmutableArray.CreateBuilder<RtssPlacement>();
+        void AddLayer()
+        {
+            if (!section.StartsWith("[Layer", StringComparison.Ordinal)) return;
+            totalLayers++;
+            if (sticky || layerText is null || x is null || y is null) return;
+            MatchCollection references = tableTag.Matches(layerText);
+            if (references.Count == 0 && (layerName is null || !layerName.Contains("Text_", StringComparison.Ordinal))) return;
+            if (references.Count > 1) partialLayers++;
+            string table = references.Count == 0 ? "" : references[0].Groups[1].Value.Replace("IMG\\", "", StringComparison.Ordinal).Trim('\\', ' ');
+            int prefixLines = references.Count == 0
+                ? Regex.Match(layerText, @"^(?:\n|\\n)*", RegexOptions.CultureInvariant).Value.Split("\\n", StringSplitOptions.None).Length - 1
+                : layerText[..references[0].Index].Split("\\n", StringSplitOptions.None).Length - 1;
+            placements.Add(new RtssPlacement(string.IsNullOrWhiteSpace(layerName) ? table : layerName, table, layerText, x.Value, y.Value, extentX, extentY, extentOrigin, prefixLines, size, color));
+        }
+        foreach (string raw in lines)
+        {
+            string line = raw.Trim();
+            if (line.StartsWith('['))
+            {
+                AddLayer();
+                section = line;
+                layerName = null; layerText = null; x = null; y = null; extentX = 0; extentY = 0; extentOrigin = 0; sticky = false; size = 100; color = "FFFFFF";
+            }
+            else if (section == "[Master]" && line.StartsWith("FontFace=", StringComparison.Ordinal)) fontFace = line[9..];
+            else if (section == "[Master]" && line.StartsWith("FontHeight=", StringComparison.Ordinal))
+            {
+                if (!int.TryParse(line[11..], NumberStyles.Integer, CultureInfo.InvariantCulture, out fontHeight) || fontHeight is < -128 or > 128 or 0)
+                    throw new InvalidDataException($"RTSS FontHeight must be between -128 and 128, excluding zero: {line}");
+            }
+            else if (section == "[Master]" && line.StartsWith("ZoomRatio=", StringComparison.Ordinal))
+            {
+                if (!double.TryParse(line[10..], NumberStyles.Float, CultureInfo.InvariantCulture, out zoomRatio) || !double.IsFinite(zoomRatio) || zoomRatio is < 0.5 or > 4)
+                    throw new InvalidDataException($"RTSS ZoomRatio must be between 0.5 and 4: {line}");
+            }
+            else if (section.StartsWith("[Layer", StringComparison.Ordinal) && line.StartsWith("Name=", StringComparison.Ordinal)) layerName = line[5..];
+            else if (section.StartsWith("[Layer", StringComparison.Ordinal) && line.StartsWith("Text=", StringComparison.Ordinal)) layerText = line[5..];
+            else if (section.StartsWith("[Layer", StringComparison.Ordinal) && line.StartsWith("PositionX=", StringComparison.Ordinal)) x = ParsePosition(line[10..], section);
+            else if (section.StartsWith("[Layer", StringComparison.Ordinal) && line.StartsWith("PositionY=", StringComparison.Ordinal)) y = ParsePosition(line[10..], section);
+            else if (section.StartsWith("[Layer", StringComparison.Ordinal) && line.StartsWith("ExtentX=", StringComparison.Ordinal)) extentX = ParsePosition(line[8..], section);
+            else if (section.StartsWith("[Layer", StringComparison.Ordinal) && line.StartsWith("ExtentY=", StringComparison.Ordinal)) extentY = ParsePosition(line[8..], section);
+            else if (section.StartsWith("[Layer", StringComparison.Ordinal) && line.StartsWith("ExtentOrigin=", StringComparison.Ordinal))
+            {
+                extentOrigin = ParsePosition(line[13..], section);
+                if (extentOrigin is < 0 or > 8) throw new InvalidDataException($"RTSS {section} has an extent origin outside 0–8: {line}");
+            }
+            else if (section.StartsWith("[Layer", StringComparison.Ordinal) && line.StartsWith("PositionSticky=", StringComparison.Ordinal)) sticky = ParsePosition(line[15..], section) >= 0;
+            else if (section.StartsWith("[Layer", StringComparison.Ordinal) && line.StartsWith("Size=", StringComparison.Ordinal))
+            {
+                if (!int.TryParse(line[5..], NumberStyles.Integer, CultureInfo.InvariantCulture, out size) || size is < 0 or > 300)
+                    throw new InvalidDataException($"RTSS {section} has an invalid text size: {line}");
+            }
+            else if (section.StartsWith("[Layer", StringComparison.Ordinal) && line.StartsWith("TextColor=", StringComparison.Ordinal))
+            {
+                MatchCollection colors = Regex.Matches(line[10..], @"(?<![0-9A-Fa-f])[0-9A-Fa-f]{6,8}(?![0-9A-Fa-f])", RegexOptions.CultureInvariant);
+                if (colors.Count == 0)
+                    throw new InvalidDataException($"RTSS {section} has an invalid text color: {line}");
+                color = colors[colors.Count - 1].Value;
+            }
+        }
+        AddLayer();
+        if (fontFace.Length is < 1 or > 80 || fontFace.Any(char.IsControl) || fontHeight == 0 || placements.Count == 0) return null;
+        return new RtssLayoutInfo(fontFace, fontHeight, zoomRatio, placements.ToImmutable(), totalLayers, partialLayers);
+    }
+
+    private static int ParsePosition(string text, string section)
+    {
+        if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) && value is >= -4096 and <= 4096) return value;
+        throw new InvalidDataException($"RTSS {section} contains a position outside -4096 to 4096: {text}");
     }
 
     private static RtssSprite CreateSprite(string name, BitmapSource preview, int width, int height)

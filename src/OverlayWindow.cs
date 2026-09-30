@@ -111,6 +111,7 @@ public sealed partial class OverlayCanvas : Canvas
     private readonly Dictionary<string, ImmutableArray<(long At, double Percent)>> usageSamples = new();
     private readonly Dictionary<string, (Image Image, BitmapSource[] Frames, ArtworkAnimationSource Source, double Minimum, double Maximum, int Index, long UpdatedAt)> artworkAnimations = new();
     private readonly Dictionary<string, (Border Fill, double Width, ArtworkBarSource Source, double Minimum, double Maximum)> artworkBars = new();
+    private readonly Dictionary<string, TextBlock> rtssTexts = new();
     private readonly Dictionary<string, Image> gameIcons = new();
     private string gameName = "Waiting for game";
     private string presentApi = "—";
@@ -159,7 +160,7 @@ public sealed partial class OverlayCanvas : Canvas
         usageGauges.Clear();
         fanWidgets.Clear(); fanRpms.Clear(); animatedRpms.Clear();
         usageTrends.Clear();
-        artworkTimer.Stop(); artworkAnimations.Clear(); artworkBars.Clear();
+        artworkTimer.Stop(); artworkAnimations.Clear(); artworkBars.Clear(); rtssTexts.Clear();
         gameIcons.Clear();
         foreach (string key in usageSamples.Keys.Except(value.Sections.Select(style => style.Key)).ToArray()) usageSamples.Remove(key);
         foreach (string key in panels.Keys.Except(value.Sections.Select(style => style.Key)).ToArray())
@@ -215,6 +216,13 @@ public sealed partial class OverlayCanvas : Canvas
                     panel.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(style.NameColor));
                     panel.Child = null;
                 }
+                else if (style.RtssTextSource != RtssTextSource.None)
+                {
+                    TextBlock reading = new() { Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(style.NameColor)), FontFamily = new FontFamily(style.RtssFontFace.Length == 0 ? preferences.Font : style.RtssFontFace), FontSize = style.NameSize, FontWeight = FontWeights.Bold, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = style.ImageWidth };
+                    AutomationProperties.SetAutomationId(reading, "RtssText_" + style.Key);
+                    panel.Child = reading;
+                    rtssTexts.Add(style.Key, reading);
+                }
                 else
                     panel.Child = new TextBlock { Text = style.Name, Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(style.NameColor)), FontFamily = new FontFamily(preferences.Font), FontSize = style.NameSize, FontWeight = FontWeights.Bold };
                 panel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -229,7 +237,7 @@ public sealed partial class OverlayCanvas : Canvas
             panel.Width = double.NaN;
             panel.LayoutTransform = new ScaleTransform(preferences.OverlayScale, preferences.OverlayScale);
             panel.Padding = new Thickness(style.Padding);
-            panel.Background = new SolidColorBrush(Color.FromArgb((byte)(preferences.Opacity * 255), 12, 16, 22));
+            panel.Background = style.GraphTransparent ? Brushes.Transparent : new SolidColorBrush(Color.FromArgb((byte)(preferences.Opacity * 255), 12, 16, 22));
             if (style.ThemeCard)
             {
                 panel.Width = Math.Max(style.UsageGauge ? 390 : 340, Math.Max(style.Graph ? style.GraphWidth + 34 : 0, style.UsageBar ? style.UsageBarWidth + 34 : 0));
@@ -351,13 +359,13 @@ public sealed partial class OverlayCanvas : Canvas
                 FrameworkElement graph;
                 if (style.GraphSource == ArtworkGraphSource.FrameTime)
                 {
-                    FrameGraph frameGraph = new() { Width = style.GraphWidth, Height = style.GraphHeight, LineBrush = new SolidColorBrush(color), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
+                    FrameGraph frameGraph = new() { Width = style.GraphWidth, Height = style.GraphHeight, LineBrush = new SolidColorBrush(color), LineOnly = style.GraphTransparent, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
                     graphs.Add(style.Key, frameGraph);
                     graph = frameGraph;
                 }
                 else
                     graph = CreateUsagePlot(style, color, style.GraphWidth, style.GraphHeight);
-                graph.Margin = style.GraphBelow ? new Thickness(0, 8, 0, 0) : new Thickness(18, 0, 0, 0);
+                graph.Margin = style.GraphTransparent ? new Thickness(0) : style.GraphBelow ? new Thickness(0, 8, 0, 0) : new Thickness(18, 0, 0, 0);
                 if (style.ThemeCard && style.GraphBelow) lines.Children.Insert(2, graph);
                 else
                     contents.Children.Add(graph);
@@ -381,6 +389,18 @@ public sealed partial class OverlayCanvas : Canvas
         UpdateArtworkBars();
         if (dragging is not null) return;
         bool resized = false;
+        foreach ((string key, TextBlock reading) in rtssTexts)
+        {
+            SectionStyle style = preferences.Sections.Single(item => item.Key == key);
+            string text = RtssReading(style.RtssTextSource);
+            if (reading.Text == text) continue;
+            reading.Text = text;
+            Border panel = panels[key];
+            Size previous = panel.DesiredSize;
+            panel.InvalidateMeasure();
+            panel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            resized |= previous != panel.DesiredSize;
+        }
         foreach (SectionStyle style in preferences.Sections)
         {
             if (style.Kind == SectionKind.Artwork) continue;
@@ -443,6 +463,31 @@ public sealed partial class OverlayCanvas : Canvas
         RefreshFanAnimations();
         RefreshArtworkAnimations();
     }
+    private string RtssReading(RtssTextSource source)
+    {
+        MetricValue Metric(SectionKind kind, string id) => data.Single(section => section.Kind == kind).Metrics.Single(metric => metric.Id == id);
+        string Reading(SectionKind kind, string id) => Metric(kind, id).Text is "Unavailable" ? "—" : Metric(kind, id).Text.Replace(".0 ", " ", StringComparison.Ordinal);
+        string Percent(SectionKind kind) => Metric(kind, "usage").Percent is double value ? $"{value:0}%" : "—";
+        return source switch
+        {
+            RtssTextSource.FrameRate => $"{Reading(SectionKind.Frames, "app")}  {Reading(SectionKind.Frames, "frametime")}",
+            RtssTextSource.GameInfo => $"{gameName}\n{presentApi}",
+            RtssTextSource.Clock => DateTime.Now.ToString("HH:mm"),
+            RtssTextSource.GpuUsage => Percent(SectionKind.Gpu),
+            RtssTextSource.GpuClock => Reading(SectionKind.Gpu, "clock"),
+            RtssTextSource.GpuVram => Reading(SectionKind.Gpu, "vram"),
+            RtssTextSource.GpuTemperature => Reading(SectionKind.Gpu, "temperature"),
+            RtssTextSource.GpuName => data.Single(section => section.Kind == SectionKind.Gpu).Name,
+            RtssTextSource.GpuPower => Reading(SectionKind.Gpu, "power"),
+            RtssTextSource.CpuUsage => Percent(SectionKind.Cpu),
+            RtssTextSource.CpuTemperature => Reading(SectionKind.Cpu, "temperature"),
+            RtssTextSource.CpuName => data.Single(section => section.Kind == SectionKind.Cpu).Name,
+            RtssTextSource.CpuPower => Reading(SectionKind.Cpu, "power"),
+            RtssTextSource.RamUsage => data.Single(section => section.Kind == SectionKind.Ram).Metrics.Single(metric => metric.Id == "used").Percent is double percent ? $"{percent:0}%" : "—",
+            RtssTextSource.RamUsed => Reading(SectionKind.Ram, "used"),
+            _ => throw new ArgumentOutOfRangeException(nameof(source), source, "Select a supported RTSS text field.")
+        };
+    }
     public void UpdateGameInfo(string name, string runtime, ImageSource? icon)
     {
         gameName = name;
@@ -478,8 +523,9 @@ public sealed partial class OverlayCanvas : Canvas
     }
     private Canvas CreateUsagePlot(SectionStyle style, Color color, double width, double height)
     {
-        Canvas plot = new() { Width = width, Height = height, ClipToBounds = true, Background = new SolidColorBrush(Color.FromArgb(32, color.R, color.G, color.B)) };
-        plot.Children.Add(new Line { X1 = 0, X2 = width, Y1 = height / 2, Y2 = height / 2, Stroke = new SolidColorBrush(Color.FromArgb(70, color.R, color.G, color.B)), StrokeThickness = 1 });
+        Canvas plot = new() { Width = width, Height = height, ClipToBounds = true, Background = style.GraphTransparent ? Brushes.Transparent : new SolidColorBrush(Color.FromArgb(32, color.R, color.G, color.B)) };
+        if (!style.GraphTransparent)
+            plot.Children.Add(new Line { X1 = 0, X2 = width, Y1 = height / 2, Y2 = height / 2, Stroke = new SolidColorBrush(Color.FromArgb(70, color.R, color.G, color.B)), StrokeThickness = 1 });
         Polyline trend = new() { Stroke = new SolidColorBrush(color), StrokeThickness = 2.5, StrokeLineJoin = PenLineJoin.Round };
         AutomationProperties.SetAutomationId(trend, "UsageTrend_" + style.Key);
         plot.Children.Add(trend);
@@ -629,7 +675,7 @@ public sealed partial class OverlayCanvas : Canvas
                 artworkAnimations[key] = (item.Image, item.Frames, item.Source, item.Minimum, item.Maximum, 0, now);
                 continue;
             }
-            double interval = item.Source == ArtworkAnimationSource.GpuFan ? Math.Clamp(12000 / rpm!.Value, 100, 500) : 250;
+            double interval = item.Source == ArtworkAnimationSource.GpuFan ? Math.Clamp(12000 / rpm!.Value, 100, 500) : preferences.Sections.Single(section => section.Key == key).AnimationIntervalMs;
             if (now - item.UpdatedAt < interval) continue;
             int next = (item.Index + 1) % item.Frames.Length;
             item.Image.Source = item.Frames[next];

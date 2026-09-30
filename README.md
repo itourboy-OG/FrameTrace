@@ -17,6 +17,9 @@
   <tr>
     <td align="center" colspan="2"><strong>Settings · accessibility, updates and feedback</strong><br><img src="docs/screenshots/settings-bottom.png" alt="Reduced motion, update checks, and community feedback options" width="720"></td>
   </tr>
+  <tr>
+    <td align="center" colspan="2"><strong>About and quick controls</strong><br><img src="docs/screenshots/about.png" alt="Frame Trace About page and quick controls" width="720"></td>
+  </tr>
 </table>
 
 ## Get Frame Trace
@@ -30,8 +33,8 @@ The installer is unsigned in this early release, so Windows may show a SmartScre
 - **Automatic capture:** follows the foreground application that is presenting frames. If detection misses a game, select its running process from the dashboard. The dashboard can also allow or exclude a selected executable from future automatic capture. You do not need to choose an executable file or start capture manually.
 - **Frame performance:** app/present FPS, observed display FPS, rolling average, 1% low, frame time, and a live frame-time graph.
 - **Hardware readings:** GPU load, temperature, power, clock, and VRAM; CPU load, temperature, and power where the sensor driver exposes them; physical RAM used.
-- **Overlay Studio:** drag or group-select items, add separate metrics and freeform text or artwork layers, rename labels, adjust colors, fonts, sizes, graphs, and opacity. Match the canvas to your monitor, use the grid and snapping, save or delete named presets, and test edits live. The Undo button or Ctrl+C on the canvas restores the preceding layout edit; Ctrl+C still copies text while editing a text field. Unsaved-edits prompts protect work before replacing a layout.
-- **Graphical layouts:** nine built-in presets include the compact horizontal strip. Live usage bars, gauges, graphs, GPU fan artwork, temperature alarms, and a game-name/icon/presentation-API item can be positioned on the canvas. Import supported still images, animations, graphs, and bars from an RTSS `.ovl` skin and its companion PNG, then arrange and customize them in Frame Trace.
+- **Overlay Studio:** drag or group-select items, add separate metrics and freeform text or artwork layers, rename labels, adjust colors, fonts, sizes, graphs, and opacity. Match the canvas to your monitor, use the grid and snapping, save or delete named presets, and test edits live. The Undo button or Ctrl+Z on the canvas restores the preceding layout edit; Ctrl+Z still undoes text while editing a text field. Unsaved-edits prompts protect work before replacing a layout.
+- **Graphical layouts:** nine built-in presets include the compact horizontal strip. Live usage bars, gauges, graphs, GPU fan artwork, temperature alarms, and a game-name/icon/presentation-API item can be positioned on the canvas. Import an RTSS `.ovl` skin with its companion PNG, preview artwork by hovering over its name, and place supported artwork, animations, graphs, and bars from its layer positions; adjust the result or add individual pieces in Frame Trace.
 - **Settings:** customize the overlay shortcut and startup state, launch at Windows sign-in, start minimized, reduce background motion, ignore selected processes, adjust sensor polling, and choose whether to check for updates on startup.
 - **Background work:** the decorative animation pauses when minimized or hidden. Capture and configured sensor polling continue, while hidden dashboard, studio, and overlay displays skip their refresh work. Visible graphs keep their real timestamps and stop requesting redraws when hidden or empty.
 - **Updates:** checks the public GitHub Releases API, offers an optional installer download with percentage progress and checksum verification, and starts Windows Setup after you choose Update now. Failed or canceled downloads are not installed. It does not upload performance readings.
@@ -41,7 +44,7 @@ The Windows smoke suite passes locally, including real PresentMon capture, senso
 ## Known limitations
 
 - **In-game upscaler details are not detected.** DLSS, FSR, XeSS upscaling modes and quality presets, and OptiScaler’s input/output configuration are not reported.
-- **RTSS import is partial.** Imported artwork and supported live widgets can be edited and saved, but RTSS layout positions, custom formulas, and unsupported tables are not converted automatically. Keep the `.ovl` and companion PNG together when importing.
+- **RTSS import is experimental and partial.** It may change or be removed. Supported artwork and live widgets can use the skin's layer positions, but placement is approximate and may need manual alignment before saving. Custom formulas, combined RTSS instructions, and unsupported tables still require manual work. Keep the `.ovl` and companion PNG together when importing.
 - **Frame generation identification depends on data reported by the capture path.** AFMF 2.1 and Intel XeSS-FG can be identified when PresentMon reports their tags. DLSS frame generation, in-game FSR frame generation, and a guaranteed split between native and generated FPS are not supported. Missing data means unknown, not disabled.
 - **True exclusive fullscreen is not supported by the desktop overlay.** Capture may still report frame data. Windowed and borderless games use the Windows desktop compositor; behavior can vary by title and driver.
 - **Anti-cheat compatibility has not been certified.** Frame Trace does not inject code into games, but that alone cannot guarantee that every anti-cheat permits an overlay. Competitive-game compatibility and account safety have not been verified; follow each game's rules.
@@ -64,7 +67,7 @@ Requirements: Windows 10 or later, .NET 9 SDK, and Inno Setup 6.
 
 ```powershell
 ./build.ps1
-./artifacts/app-0.8.0/FrameTrace.exe --smoke-test C:/path/to/test-results
+./artifacts/app-0.8.5/FrameTrace.exe --smoke-test C:/path/to/test-results
 ```
 
 The build creates a self-contained Windows x64 application and per-user installer. It downloads PresentMon 2.6.0 when needed and verifies its SHA-256 before packaging. The smoke test writes a `result.txt` report and screenshots; it uses real local sensors and ETW capture but does not validate every game or anti-cheat.
@@ -72,6 +75,7 @@ The build creates a self-contained Windows x64 application and per-user installe
 ## Roadmap
 
 - Validate AFMF 2.1 gameplay after the performance changes, including displaying the overlay on a second monitor.
+- Improve RTSS skin import for custom formulas and advanced widgets.
 - Test capture and overlay behavior across more games, graphics cards, drivers, and display modes.
 - Investigate a safe path for true exclusive-fullscreen overlays.
 - Explore reliable, cooperative reporting of in-game DLSS, FSR, XeSS, and frame-generation settings.

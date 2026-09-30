@@ -135,7 +135,9 @@ public partial class MainWindow : Window
                 catch (Win32Exception error) { Report("Shortcut unavailable; choose another in Settings", error); }
 
                 monitoring = MonitorAsync();
+#if !PREVIEW_BUILD
                 if (preferences.CheckUpdatesOnStartup) _ = CheckForUpdatesAsync();
+#endif
 
             }
 

@@ -21,6 +21,7 @@ public sealed class FrameGraph : FrameworkElement
     private bool rendering;
     internal bool IsAnimating => rendering;
     public Brush LineBrush { get; set; } = Brushes.Aquamarine;
+    public bool LineOnly { get; set; }
     public FrameGraph()
     {
         ClipToBounds = true;
@@ -66,9 +67,12 @@ public sealed class FrameGraph : FrameworkElement
         foreach (FramePoint sample in samples)
             if (sample.At >= end - 10000 && sample.At <= end) { ceiling = Math.Max(ceiling, sample.Milliseconds); hasSamples = true; }
         double scale = 16.7 * Math.Pow(2, Math.Ceiling(Math.Log2(ceiling / 16.7)));
-        double height = Math.Max(1, ActualHeight - 20);
-        drawing.DrawLine(GuidePen, new Point(0, height), new Point(ActualWidth, height));
-        drawing.DrawLine(GuidePen, new Point(0, height / 2), new Point(ActualWidth, height / 2));
+        double height = Math.Max(1, ActualHeight - (LineOnly ? 0 : 20));
+        if (!LineOnly)
+        {
+            drawing.DrawLine(GuidePen, new Point(0, height), new Point(ActualWidth, height));
+            drawing.DrawLine(GuidePen, new Point(0, height / 2), new Point(ActualWidth, height / 2));
+        }
         StreamGeometry path = new();
         using (StreamGeometryContext context = path.Open())
         {
@@ -84,6 +88,7 @@ public sealed class FrameGraph : FrameworkElement
         }
         if (linePen is null || linePen.Brush != LineBrush) linePen = new Pen(LineBrush, 1.25);
         path.Freeze(); drawing.DrawGeometry(null, linePen, path);
+        if (LineOnly) return;
         string nextCaption = hasSamples ? $"10 s   ·   0–{scale:0.#} ms" : "Waiting for samples";
         double dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
         if (captionText is null || caption != nextCaption || captionDpi != dpi)

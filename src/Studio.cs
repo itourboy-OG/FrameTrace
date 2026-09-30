@@ -125,6 +125,10 @@ public partial class MainWindow
         PreviewViewport.ScrollToVerticalOffset(Math.Max(0, bounds.Y * zoom - 12));
     }
     private void ActualStudio(object sender, RoutedEventArgs e) { fitStudio = false; SetZoom(1); }
+    private void ResetZoom(object sender, MouseButtonEventArgs e) { FitPreview(); e.Handled = true; }
+    private void ResetOverlaySize(object sender, MouseButtonEventArgs e) { OverlaySize.Value = 100; e.Handled = true; }
+    private void ResetPanelOpacity(object sender, MouseButtonEventArgs e) { PanelOpacity.Value = 0.65; e.Handled = true; }
+    private void ResetSensorRefresh(object sender, MouseButtonEventArgs e) { SensorRefreshSlider.Value = 1000; e.Handled = true; }
     private void ChangeZoom(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (!ready || zoomUpdating) return;
@@ -288,7 +292,7 @@ public partial class MainWindow
 
     private void UndoStudioShortcut(object sender, KeyEventArgs e)
     {
-        if (Pages.SelectedIndex != 1 || e.Key != Key.C || Keyboard.Modifiers != ModifierKeys.Control || Keyboard.FocusedElement is TextBoxBase) return;
+        if (Pages.SelectedIndex != 1 || e.Key != Key.Z || Keyboard.Modifiers != ModifierKeys.Control || Keyboard.FocusedElement is TextBoxBase) return;
         UndoStudio(sender, new RoutedEventArgs());
         e.Handled = true;
     }
@@ -342,9 +346,9 @@ public partial class MainWindow
         SectionName.Text = section.Name; SectionVisible.IsChecked = section.Visible; NameSize.Value = section.NameSize; ValueSize.Value = section.ValueSize;
         IndependentLabelSize.IsChecked = section.LabelSize > 0; LabelSize.Value = section.LabelSize > 0 ? section.LabelSize : section.ValueSize;
         ShowSectionName.IsChecked = section.ShowName; HorizontalSection.IsChecked = section.Horizontal;
-        GraphOptions.Visibility = section.Kind == SectionKind.Frames ? Visibility.Visible : Visibility.Collapsed;
+        GraphOptions.Visibility = section.Kind is SectionKind.Artwork or SectionKind.Game ? Visibility.Collapsed : Visibility.Visible;
         MetricLayoutSelector.SelectedIndex = (int)section.Layout; SectionPadding.Value = section.Padding;
-        HeroSize.Value = section.HeroSize; GraphBelow.IsChecked = section.GraphBelow; TextShadow.IsChecked = section.TextShadow;
+        HeroSize.Value = section.HeroSize; GraphBelow.IsChecked = section.GraphBelow; GraphTransparent.IsChecked = section.GraphTransparent; TextShadow.IsChecked = section.TextShadow;
         artworkOptions.Visibility = section.Kind == SectionKind.Artwork && (section.ImageData.Length > 0 || !section.AnimationFrames.IsEmpty || section.ArtworkFill || section.BarSource != ArtworkBarSource.None) ? Visibility.Visible : Visibility.Collapsed;
         artworkWidth.Value = section.ImageWidth;
         artworkHeight.Value = section.ImageHeight;
@@ -353,6 +357,8 @@ public partial class MainWindow
         radiusOptions.Visibility = section.ArtworkFill ? Visibility.Visible : Visibility.Collapsed;
         animationOptions.Visibility = section.AnimationFrames.IsEmpty ? Visibility.Collapsed : Visibility.Visible;
         animationPlayback.SelectedIndex = (int)section.AnimationSource;
+        animationSpeed.Value = section.AnimationIntervalMs;
+        animationSpeedOptions.Visibility = section.AnimationSource == ArtworkAnimationSource.Loop ? Visibility.Visible : Visibility.Collapsed;
         alarmThresholdOptions.Visibility = section.AnimationSource is ArtworkAnimationSource.GpuTemperatureAlarm or ArtworkAnimationSource.CpuTemperatureAlarm ? Visibility.Visible : Visibility.Collapsed;
         alarmThreshold.Value = Math.Clamp(section.AnimationMaximum, alarmThreshold.Minimum, alarmThreshold.Maximum);
         NameColor.Content = section.BarSource != ArtworkBarSource.None ? "Bar color" : section.ArtworkFill ? "Fill color" : "Name color";
@@ -418,8 +424,8 @@ public partial class MainWindow
     {
         if (!ready || loading || draft.Sections.IsEmpty) return;
         ImmutableArray<string> metrics = Selected.Metrics.Concat(Preferences.AvailableMetrics(Selected.Kind).Except(Selected.Metrics)).Where(id => metricChecks[id].IsChecked == true).ToImmutableArray();
-        SectionStyle edited = Selected with { Name = SectionName.Text, Visible = SectionVisible.IsChecked == true, NameSize = NameSize.Value, ValueSize = ValueSize.Value, Metrics = metrics, ShowName = ShowSectionName.IsChecked == true, Horizontal = HorizontalSection.IsChecked == true, Graph = ShowGraph.IsChecked == true, GraphWidth = GraphWidth.Value, GraphHeight = GraphHeight.Value, Layout = (MetricLayout)MetricLayoutSelector.SelectedIndex, Padding = SectionPadding.Value, HeroSize = HeroSize.Value, GraphBelow = GraphBelow.IsChecked == true, TextShadow = TextShadow.IsChecked == true, LabelSize = IndependentLabelSize.IsChecked == true ? LabelSize.Value : 0 };
-        edited = edited with { ThemeCard = themeCardToggle.IsChecked == true, UsageGauge = usageGaugeToggle.IsChecked == true, UsageBar = usageBarToggle.IsChecked == true, UsageBarWidth = usageBarWidth.Value, FanWidget = fanToggle.IsChecked == true, FanSize = fanSize.Value, ImageWidth = artworkWidth.Value, ImageHeight = artworkHeight.Value, ArtworkOpacity = artworkOpacity.Value, ArtworkRadius = artworkRadius.Value, AnimationSource = Selected.AnimationFrames.IsEmpty ? Selected.AnimationSource : (ArtworkAnimationSource)animationPlayback.SelectedIndex };
+        SectionStyle edited = Selected with { Name = SectionName.Text, Visible = SectionVisible.IsChecked == true, NameSize = NameSize.Value, ValueSize = ValueSize.Value, Metrics = metrics, ShowName = ShowSectionName.IsChecked == true, Horizontal = HorizontalSection.IsChecked == true, Graph = ShowGraph.IsChecked == true, GraphTransparent = GraphTransparent.IsChecked == true, GraphWidth = GraphWidth.Value, GraphHeight = GraphHeight.Value, Layout = (MetricLayout)MetricLayoutSelector.SelectedIndex, Padding = SectionPadding.Value, HeroSize = HeroSize.Value, GraphBelow = GraphBelow.IsChecked == true, TextShadow = TextShadow.IsChecked == true, LabelSize = IndependentLabelSize.IsChecked == true ? LabelSize.Value : 0 };
+        edited = edited with { ThemeCard = themeCardToggle.IsChecked == true, UsageGauge = usageGaugeToggle.IsChecked == true, UsageBar = usageBarToggle.IsChecked == true, UsageBarWidth = usageBarWidth.Value, FanWidget = fanToggle.IsChecked == true, FanSize = fanSize.Value, ImageWidth = artworkWidth.Value, ImageHeight = artworkHeight.Value, ArtworkOpacity = artworkOpacity.Value, ArtworkRadius = artworkRadius.Value, AnimationIntervalMs = (int)animationSpeed.Value, AnimationSource = Selected.AnimationFrames.IsEmpty ? Selected.AnimationSource : (ArtworkAnimationSource)animationPlayback.SelectedIndex };
         if (edited.AnimationSource is ArtworkAnimationSource.GpuTemperatureAlarm or ArtworkAnimationSource.CpuTemperatureAlarm)
             edited = edited with { AnimationMinimum = alarmThreshold.Value - 1, AnimationMaximum = alarmThreshold.Value };
         if (sender == alarmThreshold)

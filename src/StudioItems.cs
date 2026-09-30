@@ -21,7 +21,7 @@ public partial class MainWindow
     private void AddSeparateMetric(object sender, RoutedEventArgs e)
     {
         if (AddMetricSelector.SelectedItem is not MetricChoice metric) return;
-        if (draft.Sections.Length >= 64) { StudioStatus.Text = "This layout has reached its 64-item limit."; return; }
+        if (draft.Sections.Length >= Preferences.MaxOverlayItems) { StudioStatus.Text = $"This layout has reached its {Preferences.MaxOverlayItems}-item limit."; return; }
         SectionStyle source =
             metric.Kind == SectionKind.Game
             ? new SectionStyle(SectionKind.Game, "GAME", "#83EFCD", "#FFFFFF", 16, 20, 0.35, 0.1, true, []) { ShowName = false, Layout = MetricLayout.Table }
@@ -48,7 +48,7 @@ public partial class MainWindow
 
     private void DuplicateOverlayItem()
     {
-        if (draft.Sections.Length >= 64) { StudioStatus.Text = "This layout has reached its 64-item limit."; return; }
+        if (draft.Sections.Length >= Preferences.MaxOverlayItems) { StudioStatus.Text = $"This layout has reached its {Preferences.MaxOverlayItems}-item limit."; return; }
         SectionStyle source = Selected;
         SectionStyle copy = source with { Id = Guid.NewGuid().ToString("N"), X = Math.Min(source.X + 0.02, 1), Y = Math.Min(source.Y + 0.02, 1) };
         draft = draft with { Sections = draft.Sections.Add(copy) };

@@ -2,7 +2,7 @@
 
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
 
-  <assemblyIdentity version="0.8.0.0" name="FrameTrace.app" />
+  <assemblyIdentity version="0.8.5.0" name="FrameTrace.app" />
 
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false" /></requestedPrivileges></security></trustInfo>
 

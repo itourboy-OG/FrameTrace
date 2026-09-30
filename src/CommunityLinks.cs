@@ -6,6 +6,7 @@ namespace FrameTrace;
 
 public partial class MainWindow
 {
+    private void OpenProjectPage(object sender, RoutedEventArgs e) => OpenCommunityPage(new Uri("https://github.com/itourboy-OG/FrameTrace"));
     private void OpenBugReport(object sender, RoutedEventArgs e) => OpenCommunityPage(new Uri("https://github.com/itourboy-OG/FrameTrace/issues/new?template=bug_report.yml"));
     private void OpenFeedback(object sender, RoutedEventArgs e) => OpenCommunityPage(new Uri("https://github.com/itourboy-OG/FrameTrace/issues/new?template=feedback.yml"));
 

@@ -20,16 +20,21 @@ public partial class MainWindow
     private readonly StackPanel radiusOptions = new();
     private readonly StackPanel animationOptions = new();
     private readonly ComboBox animationPlayback = new() { MaxDropDownHeight = 220 };
+    private readonly StackPanel animationSpeedOptions = new();
+    private readonly TextBlock animationSpeedLabel = new() { Foreground = Brushes.LightSlateGray };
+    private readonly Slider animationSpeed = new() { Minimum = 50, Maximum = 1000, Value = 250, TickFrequency = 25, IsSnapToTickEnabled = true };
     private readonly StackPanel alarmThresholdOptions = new();
     private readonly TextBlock alarmThresholdLabel = new() { Foreground = Brushes.LightSlateGray };
     private readonly Slider alarmThreshold = new() { Minimum = 50, Maximum = 100, Value = 85, TickFrequency = 1, IsSnapToTickEnabled = true };
-    private readonly ComboBox spritePicker = new() { DisplayMemberPath = "Name", MaxDropDownHeight = 320, Visibility = Visibility.Collapsed };
+    private readonly ComboBox spritePicker = new() { MaxDropDownHeight = 320, Visibility = Visibility.Collapsed };
     private readonly Image spritePreview = new() { Height = 100, Stretch = Stretch.Uniform, Margin = new Thickness(0, 9, 0, 9), Visibility = Visibility.Collapsed };
     private readonly TextBlock animationDescription = new() { Foreground = Brushes.LightSlateGray, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
     private readonly DispatcherTimer spritePreviewTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private BitmapSource[] spritePreviewFrames = [];
     private int spritePreviewIndex;
     private readonly TextBlock importDescription = new() { TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 6, 0, 6), Visibility = Visibility.Collapsed };
+    private readonly Button placeRtssLayoutButton = new() { Content = "Place supported skin layout", Margin = new Thickness(0, 0, 0, 8), Visibility = Visibility.Collapsed };
+    private RtssArtwork? importedRtssSkin;
     private readonly Button addSpriteButton = new() { Content = "Add selected RTSS artwork", Margin = new Thickness(0, 0, 0, 8), Visibility = Visibility.Collapsed };
     private readonly ComboBox graphPicker = new() { DisplayMemberPath = "Name", MaxDropDownHeight = 240, Visibility = Visibility.Collapsed };
     private readonly Button addGraphButton = new() { Content = "Add selected live graph or bar", Margin = new Thickness(0, 7, 0, 8), Visibility = Visibility.Collapsed };
@@ -55,6 +60,14 @@ public partial class MainWindow
         AutomationProperties.SetAutomationId(animationPlayback, "ArtworkPlayback");
         animationPlayback.SelectionChanged += EditSection;
         animationOptions.Children.Add(animationPlayback);
+        animationSpeedOptions.Children.Add(animationSpeedLabel);
+        animationSpeedOptions.Children.Add(animationSpeed);
+        animationOptions.Children.Add(animationSpeedOptions);
+        AutomationProperties.SetAutomationId(animationSpeed, "ArtworkFrameInterval");
+        animationSpeed.ValueChanged += EditSection;
+        animationSpeed.ValueChanged += (_, _) => animationSpeedLabel.Text = $"Loop frame interval · {animationSpeed.Value:0} ms";
+        animationSpeed.ToolTip = "Time between animation frames. Default: 250 ms. Double-click to reset.";
+        animationSpeed.PreviewMouseDoubleClick += (_, e) => { animationSpeed.Value = 250; e.Handled = true; };
         alarmThresholdOptions.Children.Add(alarmThresholdLabel);
         alarmThresholdOptions.Children.Add(alarmThreshold);
         animationOptions.Children.Add(alarmThresholdOptions);
@@ -66,6 +79,10 @@ public partial class MainWindow
         artworkHeight.ValueChanged += EditSection;
         artworkOpacity.ValueChanged += EditSection;
         artworkRadius.ValueChanged += EditSection;
+        artworkOpacity.ToolTip = "Artwork opacity. Default: 100%. Double-click to reset.";
+        artworkOpacity.PreviewMouseDoubleClick += (_, e) => { artworkOpacity.Value = 1; e.Handled = true; };
+        artworkRadius.ToolTip = "Artwork corner rounding. Default: 0 pixels. Double-click to reset.";
+        artworkRadius.PreviewMouseDoubleClick += (_, e) => { artworkRadius.Value = 0; e.Handled = true; };
         artworkWidth.ValueChanged += (_, _) => artworkSizeText.Text = $"{artworkWidth.Value:0} × {artworkHeight.Value:0} pixels";
         artworkHeight.ValueChanged += (_, _) => artworkSizeText.Text = $"{artworkWidth.Value:0} × {artworkHeight.Value:0} pixels";
         spritePreviewTimer.Tick += (_, _) =>
@@ -75,6 +92,7 @@ public partial class MainWindow
             spritePreview.Source = spritePreviewFrames[spritePreviewIndex];
         };
         spritePicker.SetResourceReference(StyleProperty, "CaptureTargetStyle");
+        spritePicker.ItemTemplate = (DataTemplate)FindResource("RtssArtworkChoice");
         AutomationProperties.SetAutomationId(spritePicker, "RtssSpriteSelector");
         spritePicker.SelectionChanged += (_, _) =>
         {
@@ -118,18 +136,23 @@ public partial class MainWindow
         Button game = new() { Content = "Add game info · icon + present API", Margin = new Thickness(0, 0, 0, 6) };
         Button panel = new() { Content = "Add color panel", Margin = new Thickness(0, 0, 0, 6) };
         Button png = new() { Content = "Add PNG layer", Margin = new Thickness(0, 0, 0, 14) };
-        Button load = new() { Content = "Open RTSS skin (.ovl)", Margin = new Thickness(0, 0, 0, 7) };
+        Button load = new() { Content = "Open RTSS skin (.ovl)", Margin = new Thickness(0, 0, 0, 7), ToolTip = "Read artwork, animations, and supported live graphs from an RTSS skin." };
+        placeRtssLayoutButton.ToolTip = "Place supported skin layers together. Check alignment on the canvas before saving.";
+        addSpriteButton.ToolTip = "Add the selected image or animation as a movable layer.";
+        addGraphButton.ToolTip = "Add the selected graph or usage bar with live readings.";
         AutomationProperties.SetAutomationId(text, "AddTextLayer");
         AutomationProperties.SetAutomationId(game, "AddGameInfo");
         AutomationProperties.SetAutomationId(panel, "AddColorPanel");
         AutomationProperties.SetAutomationId(png, "AddPngLayer");
         AutomationProperties.SetAutomationId(load, "OpenRtssSkin");
+        AutomationProperties.SetAutomationId(placeRtssLayoutButton, "PlaceRtssLayout");
         AutomationProperties.SetAutomationId(addSpriteButton, "AddRtssSprite");
         text.Click += (_, _) => AddArtworkLayer("Your text", "", 240, 120);
         game.Click += (_, _) => AddGameInfo();
         panel.Click += (_, _) => AddColorPanel();
         png.Click += (_, _) => OpenPngLayer();
         load.Click += (_, _) => OpenRtssSkin();
+        placeRtssLayoutButton.Click += (_, _) => PlaceRtssLayout();
         addSpriteButton.Click += (_, _) =>
         {
             if (spritePicker.SelectedItem is RtssSprite sprite) AddArtworkLayer(sprite.Name, sprite.ImageData, sprite.Width, sprite.Height);
@@ -148,8 +171,11 @@ public partial class MainWindow
         ArtworkTools.Children.Add(png);
         ArtworkTools.Children.Add(new Separator { Margin = new Thickness(0, 0, 0, 12) });
         ArtworkTools.Children.Add(new TextBlock { Text = "RTSS ARTWORK", Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 0, 0, 6) });
+        ArtworkTools.Children.Add(new TextBlock { Text = "EXPERIMENTAL · RTSS import is a work in progress and may change or be removed in a future version.", Foreground = new SolidColorBrush(Color.FromRgb(255, 143, 143)), FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 7) });
+        ArtworkTools.Children.Add(new TextBlock { Text = "Placing a full skin is approximate. Artwork, graphs, and text may need manual alignment before Save & apply.", Foreground = new SolidColorBrush(Color.FromRgb(255, 143, 143)), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) });
         ArtworkTools.Children.Add(load);
         ArtworkTools.Children.Add(importDescription);
+        ArtworkTools.Children.Add(placeRtssLayoutButton);
         ArtworkTools.Children.Add(spritePicker);
         ArtworkTools.Children.Add(spritePreview);
         ArtworkTools.Children.Add(animationDescription);
@@ -157,7 +183,7 @@ public partial class MainWindow
         ArtworkTools.Children.Add(graphPicker);
         ArtworkTools.Children.Add(addGraphButton);
         ArtworkTools.Children.Add(artworkOptions);
-        ArtworkTools.Children.Add(new TextBlock { Text = "Keep the .ovl and its companion PNG together. Add the parts you want, then arrange them on the canvas. Full RTSS skin layouts and formulas are not converted automatically.", Foreground = Brushes.LightSlateGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 10) });
+        ArtworkTools.Children.Add(new TextBlock { Text = "Keep the .ovl and its companion PNG together. Place supported layers at once, or add individual parts and arrange them on the canvas. RTSS formulas and combined layers may need manual work.", Foreground = Brushes.LightSlateGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 10) });
     }
 
     private void OpenRtssSkin()
@@ -167,12 +193,14 @@ public partial class MainWindow
         try
         {
             RtssArtwork skin = RtssArtworkImporter.Read(dialog.FileName);
+            importedRtssSkin = skin;
             spritePicker.ItemsSource = skin.Sprites.Cast<object>().Concat(skin.Animations).ToArray();
             spritePicker.SelectedIndex = skin.Sprites.IsEmpty && skin.Animations.IsEmpty ? -1 : 0;
             graphPicker.ItemsSource = skin.LiveGraphs.Cast<object>().Concat(skin.LiveBars).ToArray();
             graphPicker.SelectedIndex = skin.LiveGraphs.IsEmpty && skin.LiveBars.IsEmpty ? -1 : 0;
-            importDescription.Text = $"{skin.Sprites.Length} still images, {skin.Animations.Length} animations, {skin.LiveGraphs.Length} live graphs, and {skin.LiveBars.Length} live bars ready. {skin.UnsupportedTables} other tables use RTSS features Frame Trace cannot convert yet.";
+            importDescription.Text = $"{skin.Sprites.Length} still images, {skin.Animations.Length} animations, {skin.LiveGraphs.Length} live graphs, and {skin.LiveBars.Length} live bars ready. {skin.UnsupportedTables} advanced RTSS tables cannot be converted yet; some may be unused by this layout.";
             importDescription.Visibility = Visibility.Visible;
+            placeRtssLayoutButton.Visibility = skin.Layout is null ? Visibility.Collapsed : Visibility.Visible;
             spritePicker.Visibility = skin.Sprites.IsEmpty && skin.Animations.IsEmpty ? Visibility.Collapsed : Visibility.Visible;
             spritePreview.Visibility = spritePicker.Visibility;
             addSpriteButton.Visibility = spritePicker.Visibility;
@@ -181,9 +209,26 @@ public partial class MainWindow
             StudioStatus.Text = skin.Sprites.IsEmpty && skin.Animations.IsEmpty && skin.LiveGraphs.IsEmpty && skin.LiveBars.IsEmpty ? "No supported artwork or graphs were found in this skin." : "Choose artwork, a live graph, or a live bar, then place it on the canvas.";
         }
         catch (IOException error) { Report("RTSS skin import failed", error); }
+        catch (InvalidDataException error) { Report("RTSS skin import failed", error); }
         catch (UnauthorizedAccessException error) { Report("RTSS skin import failed", error); }
         catch (NotSupportedException error) { Report("RTSS skin import failed", error); }
         catch (ArgumentException error) { Report("RTSS skin import failed", error); }
+    }
+
+    private void PlaceRtssLayout()
+    {
+        if (importedRtssSkin is null || DisplaySelector.SelectedItem is not DisplayInfo display) return;
+        try
+        {
+            RtssLayoutResult result = RtssLayout.Build(importedRtssSkin, display.CanvasSize);
+            Preferences layout = Preferences.Validate(draft with { OverlayScale = 1, Sections = result.Sections });
+            if (!ConfirmLayoutReplacement("place the supported RTSS skin layers")) return;
+            draft = layout;
+            LoadControls(); FitItems(this, new RoutedEventArgs());
+            StudioStatus.Text = $"Placed {result.PlacedLayers} of {result.PlacedLayers + result.SkippedLayers} RTSS layers. {result.SkippedLayers} unsupported or outside the display; {result.PartialLayers} combined layers may need adjustment. Save & apply when ready.";
+        }
+        catch (InvalidDataException error) { Report("RTSS skin layout could not be placed", error); }
+        catch (ArgumentOutOfRangeException error) { Report("RTSS skin layout could not be placed", error); }
     }
 
     private void OpenPngLayer()
@@ -210,7 +255,7 @@ public partial class MainWindow
 
     private void AddArtworkLayer(string name, string imageData, double width, double height)
     {
-        if (draft.Sections.Length >= 64) { StudioStatus.Text = "This layout has reached its 64-item limit."; return; }
+        if (draft.Sections.Length >= Preferences.MaxOverlayItems) { StudioStatus.Text = $"This layout has reached its {Preferences.MaxOverlayItems}-item limit."; return; }
         SectionStyle item = new(SectionKind.Artwork, name, "#83EFCD", "#FFFFFF", 24, 24, 0.15, 0.15, true, [])
         {
             Id = Guid.NewGuid().ToString("N"), ImageData = imageData, ImageWidth = width, ImageHeight = height,
@@ -223,7 +268,7 @@ public partial class MainWindow
 
     private void AddGameInfo()
     {
-        if (draft.Sections.Length >= 64) { StudioStatus.Text = "This layout has reached its 64-item limit."; return; }
+        if (draft.Sections.Length >= Preferences.MaxOverlayItems) { StudioStatus.Text = $"This layout has reached its {Preferences.MaxOverlayItems}-item limit."; return; }
         SectionStyle item = new(SectionKind.Game, "GAME", "#83EFCD", "#FFFFFF", 16, 18, 0.15, 0.15, true, ["game", "api"])
         {
             Id = Guid.NewGuid().ToString("N"), ShowName = false, Layout = MetricLayout.Table, Padding = 4
@@ -235,13 +280,13 @@ public partial class MainWindow
 
     private void AddLiveGraph(RtssLiveGraph graph)
     {
-        if (draft.Sections.Length >= 64) { StudioStatus.Text = "This layout has reached its 64-item limit."; return; }
+        if (draft.Sections.Length >= Preferences.MaxOverlayItems) { StudioStatus.Text = $"This layout has reached its {Preferences.MaxOverlayItems}-item limit."; return; }
         SectionKind kind = graph.Source switch { ArtworkGraphSource.GpuUsage => SectionKind.Gpu, ArtworkGraphSource.CpuUsage => SectionKind.Cpu, ArtworkGraphSource.RamUsage => SectionKind.Ram, _ => SectionKind.Frames };
         SectionStyle source = Preferences.Initial.Sections.Single(item => item.Kind == kind);
         SectionStyle item = source with
         {
             Id = Guid.NewGuid().ToString("N"), Name = graph.Name, ShowName = false,
-            Metrics = [], Graph = true, GraphSource = graph.Source, GraphWidth = graph.Width, GraphHeight = graph.Height,
+            Metrics = [], Graph = true, GraphTransparent = true, GraphSource = graph.Source, GraphWidth = graph.Width, GraphHeight = graph.Height,
             GraphBelow = true, Padding = 0, X = 0.15, Y = 0.15
         };
         draft = draft with { Sections = draft.Sections.Add(item) };
@@ -251,7 +296,7 @@ public partial class MainWindow
 
     private void AddLiveBar(RtssLiveBar bar)
     {
-        if (draft.Sections.Length >= 64) { StudioStatus.Text = "This layout has reached its 64-item limit."; return; }
+        if (draft.Sections.Length >= Preferences.MaxOverlayItems) { StudioStatus.Text = $"This layout has reached its {Preferences.MaxOverlayItems}-item limit."; return; }
         string color = bar.Source switch
         {
             ArtworkBarSource.GpuUsage => "#FFAA49", ArtworkBarSource.CpuUsage => "#69CDF6",
@@ -270,7 +315,7 @@ public partial class MainWindow
 
     private void AddAnimationLayer(RtssAnimation animation)
     {
-        if (draft.Sections.Length >= 64) { StudioStatus.Text = "This layout has reached its 64-item limit."; return; }
+        if (draft.Sections.Length >= Preferences.MaxOverlayItems) { StudioStatus.Text = $"This layout has reached its {Preferences.MaxOverlayItems}-item limit."; return; }
         SectionStyle item = new(SectionKind.Artwork, animation.Name, "#83EFCD", "#FFFFFF", 24, 24, 0.15, 0.15, true, [])
         {
             Id = Guid.NewGuid().ToString("N"), AnimationFrames = animation.Frames,
@@ -294,7 +339,7 @@ public partial class MainWindow
 
     private void AddColorPanel()
     {
-        if (draft.Sections.Length >= 64) { StudioStatus.Text = "This layout has reached its 64-item limit."; return; }
+        if (draft.Sections.Length >= Preferences.MaxOverlayItems) { StudioStatus.Text = $"This layout has reached its {Preferences.MaxOverlayItems}-item limit."; return; }
         SectionStyle item = new(SectionKind.Artwork, "Color panel", "#254B48", "#FFFFFF", 24, 24, 0.13, 0.13, true, [])
         {
             Id = Guid.NewGuid().ToString("N"), ArtworkFill = true, ImageWidth = 300, ImageHeight = 150,

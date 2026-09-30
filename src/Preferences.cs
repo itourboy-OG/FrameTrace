@@ -23,6 +23,7 @@ public enum SectionKind { Frames, Gpu, Cpu, Ram
 public enum ArtworkAnimationSource { Loop, GpuFan, GpuUsage, CpuUsage, RamUsage, GpuTemperatureAlarm, CpuTemperatureAlarm }
 public enum ArtworkGraphSource { FrameTime, GpuUsage, CpuUsage, RamUsage }
 public enum ArtworkBarSource { None, GpuUsage, CpuUsage, RamUsage, GpuTemperature, CpuTemperature }
+public enum RtssTextSource { None, FrameRate, GameInfo, Clock, GpuUsage, GpuClock, GpuVram, GpuTemperature, GpuName, GpuPower, CpuUsage, CpuTemperature, CpuName, CpuPower, RamUsage, RamUsed }
 
 public sealed record Hotkey(uint Modifiers, int Key);
 
@@ -48,6 +49,7 @@ public sealed record SectionStyle(SectionKind Kind, string Name, string NameColo
     public bool Horizontal { get; init; } = false;
 
     public bool Graph { get; init; } = false;
+    public bool GraphTransparent { get; init; }
     public ArtworkGraphSource GraphSource { get; init; }
 
     public double GraphWidth { get; init; } = 320;
@@ -62,6 +64,7 @@ public sealed record SectionStyle(SectionKind Kind, string Name, string NameColo
     public string ImageData { get; init; } = "";
     public ImmutableArray<string> AnimationFrames { get; init; } = [];
     public ArtworkAnimationSource AnimationSource { get; init; }
+    public int AnimationIntervalMs { get; init; } = 250;
     public double AnimationMinimum { get; init; }
     public double AnimationMaximum { get; init; } = 100;
     public bool AlarmThresholdCustomized { get; init; }
@@ -73,12 +76,16 @@ public sealed record SectionStyle(SectionKind Kind, string Name, string NameColo
     public bool ArtworkFill { get; init; }
     public double ArtworkOpacity { get; init; } = 1;
     public double ArtworkRadius { get; init; }
+    public RtssTextSource RtssTextSource { get; init; }
+    public string RtssFontFace { get; init; } = "";
 
 }
 
 public sealed record Preferences(int SchemaVersion, string Accent, double Opacity, string Font, Hotkey Shortcut, bool OverlayEnabled, ImmutableArray<string> IgnoredApps, ImmutableArray<SectionStyle> Sections)
 
 {
+
+    public const int MaxOverlayItems = 96;
 
     public double OverlayScale { get; init; } = 1;
     public bool HideUnknownTechnology { get; init; } = true;
@@ -157,9 +164,9 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
 
             throw new InvalidDataException("Ignored applications must be executable filenames, one per line.");
 
-        if (value.Sections.IsDefault || value.Sections.Length > 64 || value.Sections.Any(section => section is null) || value.Sections.Select(section => section.Key).Distinct().Count() != value.Sections.Length)
+        if (value.Sections.IsDefault || value.Sections.Length > MaxOverlayItems || value.Sections.Any(section => section is null) || value.Sections.Select(section => section.Key).Distinct().Count() != value.Sections.Length)
 
-            throw new InvalidDataException("A layout must contain at most 64 uniquely identified overlay items.");
+            throw new InvalidDataException($"A layout must contain at most {MaxOverlayItems} uniquely identified overlay items.");
 
         foreach (SectionStyle section in value.Sections)
 
@@ -189,8 +196,14 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
                 throw new InvalidDataException("Animated artwork needs 2–32 frames in an artwork item.");
             if (!double.IsFinite(section.AnimationMinimum) || !double.IsFinite(section.AnimationMaximum) || section.AnimationMinimum >= section.AnimationMaximum)
                 throw new InvalidDataException("Animated artwork needs a finite sensor range with a minimum below its maximum.");
+            if (section.AnimationIntervalMs is < 50 or > 1000)
+                throw new InvalidDataException("Looping artwork must use a 50–1000 millisecond frame interval.");
             if (!Enum.IsDefined(section.BarSource) || !double.IsFinite(section.BarMinimum) || !double.IsFinite(section.BarMaximum) || section.BarMinimum >= section.BarMaximum || section.BarSource != ArtworkBarSource.None && (section.Kind != SectionKind.Artwork || section.ImageData.Length > 0 || !section.AnimationFrames.IsEmpty || section.ArtworkFill || section.ShowName))
                 throw new InvalidDataException("Live bars need an artwork item with a supported sensor range and no other artwork content.");
+            if (!Enum.IsDefined(section.RtssTextSource) || section.RtssTextSource != RtssTextSource.None && (section.Kind != SectionKind.Artwork || section.ImageData.Length > 0 || !section.AnimationFrames.IsEmpty || section.ArtworkFill || section.BarSource != ArtworkBarSource.None))
+                throw new InvalidDataException("An RTSS text field must be an artwork item without an image, animation, or bar.");
+            if (section.RtssFontFace is null || section.RtssFontFace.Length > 80 || section.RtssFontFace.Any(char.IsControl))
+                throw new InvalidDataException("An imported font name must be a single line of at most 80 characters.");
             if (!section.AnimationFrames.IsEmpty)
             {
                 if (section.AnimationFrames.Length < 2 || section.ImageData.Length > 0 || section.ArtworkFill || section.ShowName || section.AnimationFrames.Sum(frame => (long)frame.Length) > 4_000_000)
