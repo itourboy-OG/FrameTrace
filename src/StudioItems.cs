@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Windows;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 public sealed record MetricChoice(SectionKind Kind, string Id, string Label);
 
@@ -12,7 +12,7 @@ public partial class MainWindow
         string? key = (SectionSelector.SelectedItem as SectionStyle)?.Key;
         bool previousLoading = loading; loading = true;
         SectionSelector.ItemsSource = draft.Sections;
-        SectionSelector.SelectedItem = draft.Sections.FirstOrDefault(item => item.Key == key) ?? draft.Sections[0];
+        SectionSelector.SelectedItem = draft.Sections.FirstOrDefault(item => item.Key == key) ?? draft.Sections.FirstOrDefault();
         loading = previousLoading;
     }
 
@@ -22,7 +22,11 @@ public partial class MainWindow
     {
         if (AddMetricSelector.SelectedItem is not MetricChoice metric) return;
         if (draft.Sections.Length >= 64) { StudioStatus.Text = "This layout has reached its 64-item limit."; return; }
-        SectionStyle source = Preferences.Initial.Sections.Single(item => item.Kind == metric.Kind);
+        SectionStyle source =
+            metric.Kind == SectionKind.Game
+            ? new SectionStyle(SectionKind.Game, "GAME", "#83EFCD", "#FFFFFF", 16, 20, 0.35, 0.1, true, []) { ShowName = false, Layout = MetricLayout.Table }
+            :
+            Preferences.Initial.Sections.Single(item => item.Kind == metric.Kind);
         SectionStyle item = source with
         {
             Id = Guid.NewGuid().ToString("N"), Name = metric.Label, ShowName = false,
@@ -35,10 +39,20 @@ public partial class MainWindow
 
     private void RemoveOverlayItem(object sender, RoutedEventArgs e)
     {
-        if (draft.Sections.Length == 1) { StudioStatus.Text = "Keep at least one item. You can hide it to make the overlay empty."; return; }
+        if (draft.Sections.IsEmpty) return;
         string key = Selected.Key;
         draft = draft with { Sections = draft.Sections.Where(item => item.Key != key).ToImmutableArray() };
         LoadControls();
         StudioStatus.Text = "Item removed from the preview. Save & apply to keep the change.";
+    }
+
+    private void DuplicateOverlayItem()
+    {
+        if (draft.Sections.Length >= 64) { StudioStatus.Text = "This layout has reached its 64-item limit."; return; }
+        SectionStyle source = Selected;
+        SectionStyle copy = source with { Id = Guid.NewGuid().ToString("N"), X = Math.Min(source.X + 0.02, 1), Y = Math.Min(source.Y + 0.02, 1) };
+        draft = draft with { Sections = draft.Sections.Add(copy) };
+        RefreshSectionSelector(); SelectEditorSection(copy.Key); LoadControls();
+        StudioStatus.Text = "Item duplicated in the preview. Save & apply to keep the change.";
     }
 }

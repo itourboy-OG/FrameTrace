@@ -3,7 +3,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 internal sealed class GamingBackground : FrameworkElement
 {

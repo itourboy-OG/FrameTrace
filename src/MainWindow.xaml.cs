@@ -13,6 +13,7 @@ using System.Text.Json;
 using System.Windows;
 
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 
 using System.Windows.Input;
 
@@ -24,7 +25,7 @@ using Microsoft.Win32;
 
 
 
-namespace Frameglass;
+namespace FrameTrace;
 
 
 
@@ -68,6 +69,10 @@ public partial class MainWindow : Window
     private string lastError = "";
 
     private string lastMode = "";
+    private int gameIconPid;
+    private ImageSource? gameIcon;
+    private string gameRuntime = "—";
+    private string gameIconStatus = "";
 
     private Task<ImmutableArray<SensorReading>>? sensorRead;
 
@@ -91,6 +96,12 @@ public partial class MainWindow : Window
         preview.SectionSelected += SelectEditorSection;
 
         preview.SectionsMoved += sections => { draft = draft with { Sections = sections }; RefreshTestOverlay(); RefreshLayoutNotice(); };
+        preview.SelectionMoveStarted += BeginLayoutGesture;
+        preview.SelectionMoveEnded += EndLayoutGesture;
+        AddHandler(Thumb.DragStartedEvent, new DragStartedEventHandler((_, _) => { if (Pages.SelectedIndex == 1) BeginLayoutGesture(); }));
+        AddHandler(Thumb.DragCompletedEvent, new DragCompletedEventHandler((_, _) => EndLayoutGesture()));
+        AddHandler(Keyboard.GotKeyboardFocusEvent, new KeyboardFocusChangedEventHandler((_, e) => { if (Pages.SelectedIndex == 1 && e.OriginalSource is TextBoxBase) BeginLayoutGesture(); }));
+        AddHandler(Keyboard.LostKeyboardFocusEvent, new KeyboardFocusChangedEventHandler((_, e) => { if (e.OriginalSource is TextBoxBase) EndLayoutGesture(); }));
 
         Loaded += (_, _) =>
 
@@ -133,6 +144,7 @@ public partial class MainWindow : Window
         };
 
         Closing += CloseAsync;
+        PreviewKeyDown += UndoStudioShortcut;
         StateChanged += (_, _) => { if (ready && WindowState != WindowState.Minimized) RenderData(); };
 
     }
@@ -220,6 +232,7 @@ public partial class MainWindow : Window
                         target = Environment.ProcessId;
                         summary = capture.ReadSummary(target);
                         GameName.Text = "Frame Trace · Overlay test";
+                        gameRuntime = "Test scene"; gameIcon = null; gameIconPid = 0; gameIconStatus = "";
                         CaptureState.Text = "Live test · Frame Trace presentation FPS, not a game benchmark";
                         if (enabled && DisplaySelector.SelectedItem is DisplayInfo testDisplay) ShowLiveOverlay(testDisplay.Bounds);
                         else overlay?.Hide();
@@ -248,6 +261,17 @@ public partial class MainWindow : Window
                         if (foreground?.ProcessId == candidate.ProcessId) FollowGameDisplay(foreground.Monitor);
 
                         GameName.Text = manual ? selectedTarget.Title : string.IsNullOrWhiteSpace(foreground!.Title) ? candidate.Application : foreground.Title;
+                        gameRuntime = candidate.Runtime;
+                        if (gameIconPid != candidate.ProcessId)
+                        {
+                            gameIconPid = candidate.ProcessId;
+                            try { gameIcon = RunningApplications.Icon(candidate.ProcessId); gameIconStatus = ""; }
+                            catch (Exception error) when (error is Win32Exception or IOException or UnauthorizedAccessException or ArgumentException)
+                            {
+                                gameIcon = null; gameIconStatus = " · game icon unavailable";
+                                Diagnostics.Write("game-icon-unavailable", JsonSerializer.Serialize(new { candidate.ProcessId, Error = error.Message }));
+                            }
+                        }
 
                     }
 
@@ -271,6 +295,8 @@ public partial class MainWindow : Window
                         : "No frame data arriving · open your game, or use Restart capture if it is already running.";
                     if (manual) GameName.Text = selectedTarget.Title;
                     if (!manual && candidate is null && !summary.AppFps.HasValue && !summary.DisplayFps.HasValue) GameName.Text = "Waiting for your game";
+                    if (candidate is null) { gameRuntime = "—"; gameIcon = null; gameIconPid = 0; gameIconStatus = ""; }
+                    CaptureState.Text += gameIconStatus;
                     if (now >= nextCaptureDiagnostic)
                     {
                         nextCaptureDiagnostic = now + 5000;
@@ -328,6 +354,7 @@ public partial class MainWindow : Window
 
     private void ShowLiveOverlay(Rect bounds)
     {
+        overlay?.UpdateGameInfo(GameName.Text, gameRuntime, gameIcon);
         overlay?.UpdateData(OverlayData.Build(readings, summary));
         overlay?.Surface.UpdateGraph(summary.Points);
         overlay?.ShowOnMonitor(bounds);
@@ -341,7 +368,11 @@ public partial class MainWindow : Window
         OverlayButton.Content = enabled ? "Overlay on" : "Overlay off";
         if (Pages.SelectedIndex == 2) return;
         ImmutableArray<OverlaySectionData> data = OverlayData.Build(readings, summary);
-        if (Pages.SelectedIndex == 1) { preview.UpdateData(data); preview.UpdateGraph(summary.Points); return; }
+        if (Pages.SelectedIndex == 1) {
+            preview.UpdateGameInfo(GameName.Text, gameRuntime, gameIcon);
+            preview.UpdateData(data); preview.UpdateGraph(summary.Points);
+            UpdateFanStatus();
+            return; }
 
         AppFps.Text = summary.AppFps?.ToString("0") ?? "—"; DisplayFps.Text = summary.DisplayFps?.ToString("0") ?? "—";
 

@@ -16,11 +16,11 @@
 
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
 
-    <Version>0.7.15</Version>
+    <Version>0.8.0</Version>
 
     <AssemblyName>FrameTrace</AssemblyName>
 
-    <RootNamespace>Frameglass</RootNamespace>
+    <RootNamespace>FrameTrace</RootNamespace>
 
     <Product>Frame Trace</Product>
 
@@ -35,7 +35,7 @@
   <PropertyGroup Condition="'$(PreviewBuild)' == 'true'">
     <DefineConstants>$(DefineConstants);PREVIEW_BUILD</DefineConstants>
     <ApplicationManifest>app-preview.manifest</ApplicationManifest>
-    <Version>0.7.15</Version>
+    <Version>0.7.28</Version>
     <AssemblyName>FrameTracePreview</AssemblyName>
     <Product>Frame Trace Preview</Product>
     <Title>Frame Trace Preview</Title>

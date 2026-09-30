@@ -6,7 +6,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 public sealed record ForegroundWindow(nint Handle, int ProcessId, string Title, Rect Monitor);
 public sealed record DisplayInfo(string Name, Rect Bounds, double Scale, bool Primary)

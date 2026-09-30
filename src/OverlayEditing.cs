@@ -5,7 +5,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 public sealed partial class OverlayCanvas
 {
@@ -78,11 +78,30 @@ public sealed partial class OverlayCanvas
             };
     }
 
-    private void EndGesture() { dragging = null; selecting = false; marquee.Visibility = Visibility.Collapsed; }
+    private void EndGesture() { if (dragging is not null) SelectionMoveEnded?.Invoke(); dragging = null; selecting = false; marquee.Visibility = Visibility.Collapsed; }
     public void SelectAll()
     {
         selected.Clear(); selected.UnionWith(panels.Where(pair => pair.Value.Visibility == Visibility.Visible).Select(pair => pair.Key));
         UpdateSelectionOutlines();
+    }
+    internal string? SectionAt(DependencyObject source)
+    {
+        for (DependencyObject? current = source; current is not null && current != this; current = ParentOf(current))
+            if (current is Border { Tag: string key } && panels.TryGetValue(key, out Border? panel) && panel == current)
+                return key;
+        return null;
+    }
+    internal bool ContainsSource(DependencyObject source)
+    {
+        for (DependencyObject? current = source; current is not null; current = ParentOf(current))
+            if (current == this) return true;
+        return false;
+    }
+    private static DependencyObject? ParentOf(DependencyObject source) => source is Visual ? VisualTreeHelper.GetParent(source) : LogicalTreeHelper.GetParent(source);
+    internal void SelectItem(string key)
+    {
+        if (!panels.ContainsKey(key)) throw new ArgumentException("The overlay item is no longer on the canvas.", nameof(key));
+        selected.Clear(); selected.Add(key); UpdateSelectionOutlines(); SectionSelected?.Invoke(key);
     }
     internal void SelectRegion(Rect area)
     {
@@ -99,6 +118,7 @@ public sealed partial class OverlayCanvas
     }
     internal void BeginSelectionMove()
     {
+        SelectionMoveStarted?.Invoke();
         dragPositions = selected.ToImmutableDictionary(item => item, item => new Point(GetLeft(panels[item]), GetTop(panels[item])));
         dragBounds = SelectionBounds();
     }

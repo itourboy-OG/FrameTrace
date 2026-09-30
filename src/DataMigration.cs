@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 internal static class DataMigration
 {

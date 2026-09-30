@@ -8,7 +8,7 @@ using LibreHardwareMonitor.Hardware;
 using LibreHardwareMonitor.PawnIo;
 using Microsoft.VisualBasic.FileIO;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 public sealed record SensorReading(string Device, string HardwareType, string Name, string Kind, double? Value, string Unit);
 public sealed record FrameReading(long ReceivedAt, int ProcessId, string Application, string Runtime, string SwapChain, string FrameType, string PresentMode, double? FrameTime, double? DisplayedTime, double StartedAt);

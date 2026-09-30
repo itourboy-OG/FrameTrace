@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Security.Cryptography;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 internal enum UpdateAvailability { UpToDate, Available, NoRelease }
 

@@ -11,13 +11,18 @@ using System.Text.RegularExpressions;
 
 
 
-namespace Frameglass;
+namespace FrameTrace;
 
 
 
 public enum MetricLayout { Flow, Table, Tiles }
 
-public enum SectionKind { Frames, Gpu, Cpu, Ram }
+public enum SectionKind { Frames, Gpu, Cpu, Ram
+    , Artwork, Game
+}
+public enum ArtworkAnimationSource { Loop, GpuFan, GpuUsage, CpuUsage, RamUsage, GpuTemperatureAlarm, CpuTemperatureAlarm }
+public enum ArtworkGraphSource { FrameTime, GpuUsage, CpuUsage, RamUsage }
+public enum ArtworkBarSource { None, GpuUsage, CpuUsage, RamUsage, GpuTemperature, CpuTemperature }
 
 public sealed record Hotkey(uint Modifiers, int Key);
 
@@ -43,10 +48,31 @@ public sealed record SectionStyle(SectionKind Kind, string Name, string NameColo
     public bool Horizontal { get; init; } = false;
 
     public bool Graph { get; init; } = false;
+    public ArtworkGraphSource GraphSource { get; init; }
 
     public double GraphWidth { get; init; } = 320;
 
     public double GraphHeight { get; init; } = 90;
+    public bool ThemeCard { get; init; }
+    public bool UsageGauge { get; init; }
+    public bool UsageBar { get; init; }
+    public double UsageBarWidth { get; init; } = 220;
+    public bool FanWidget { get; init; }
+    public double FanSize { get; init; } = 36;
+    public string ImageData { get; init; } = "";
+    public ImmutableArray<string> AnimationFrames { get; init; } = [];
+    public ArtworkAnimationSource AnimationSource { get; init; }
+    public double AnimationMinimum { get; init; }
+    public double AnimationMaximum { get; init; } = 100;
+    public bool AlarmThresholdCustomized { get; init; }
+    public ArtworkBarSource BarSource { get; init; }
+    public double BarMinimum { get; init; }
+    public double BarMaximum { get; init; } = 100;
+    public double ImageWidth { get; init; } = 240;
+    public double ImageHeight { get; init; } = 120;
+    public bool ArtworkFill { get; init; }
+    public double ArtworkOpacity { get; init; } = 1;
+    public double ArtworkRadius { get; init; }
 
 }
 
@@ -89,6 +115,8 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
         SectionKind.Cpu => ["usage", "temperature", "power"],
 
         SectionKind.Ram => ["used"],
+        SectionKind.Artwork => [],
+        SectionKind.Game => ["game", "api"],
 
         _ => throw new ArgumentOutOfRangeException(nameof(kind))
 
@@ -129,9 +157,9 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
 
             throw new InvalidDataException("Ignored applications must be executable filenames, one per line.");
 
-        if (value.Sections.IsDefault || value.Sections.Length is < 1 or > 64 || value.Sections.Any(section => section is null) || value.Sections.Select(section => section.Key).Distinct().Count() != value.Sections.Length)
+        if (value.Sections.IsDefault || value.Sections.Length > 64 || value.Sections.Any(section => section is null) || value.Sections.Select(section => section.Key).Distinct().Count() != value.Sections.Length)
 
-            throw new InvalidDataException("A layout must contain 1–64 uniquely identified overlay items.");
+            throw new InvalidDataException("A layout must contain at most 64 uniquely identified overlay items.");
 
         foreach (SectionStyle section in value.Sections)
 
@@ -146,6 +174,48 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
             if (!double.IsFinite(section.GraphWidth) || !double.IsFinite(section.GraphHeight) || section.GraphWidth is < 120 or > 1200 || section.GraphHeight is < 40 or > 400)
 
                 throw new InvalidDataException("Graph size must be 120–1200 wide and 40–400 high.");
+            if (!Enum.IsDefined(section.GraphSource)) throw new InvalidDataException("Select a supported live graph source.");
+            if (section.Graph && ((section.GraphSource == ArtworkGraphSource.GpuUsage && section.Kind != SectionKind.Gpu) || (section.GraphSource == ArtworkGraphSource.CpuUsage && section.Kind != SectionKind.Cpu) || (section.GraphSource == ArtworkGraphSource.RamUsage && section.Kind != SectionKind.Ram)))
+                throw new InvalidDataException("Hardware-load graphs require their matching GPU, CPU, or RAM item.");
+            if (section.UsageGauge && section.Kind is not (SectionKind.Gpu or SectionKind.Cpu))
+                throw new InvalidDataException("Live usage gauges require a GPU or CPU item.");
+            if (!double.IsFinite(section.UsageBarWidth) || section.UsageBarWidth is < 80 or > 500 || section.UsageBar && section.Kind is not (SectionKind.Gpu or SectionKind.Cpu))
+                throw new InvalidDataException("Live usage bars require a GPU or CPU item and a width of 80–500.");
+            if (!double.IsFinite(section.FanSize) || section.FanSize is < 24 or > 80 || section.FanWidget && section.Kind != SectionKind.Gpu)
+                throw new InvalidDataException("Animated fans require a GPU item and a size of 24–80.");
+            if (section.Kind == SectionKind.Artwork && (section.ImageData is null || section.ImageData.Length > 4_000_000 || !double.IsFinite(section.ImageWidth) || !double.IsFinite(section.ImageHeight) || section.ImageWidth is < 1 or > 2048 || section.ImageHeight is < 1 or > 2048))
+                throw new InvalidDataException("Artwork must be a valid image no larger than 3 MB and 1–2048 pixels in each dimension.");
+            if (section.AnimationFrames.IsDefault || section.AnimationFrames.Length > 32 || section.AnimationFrames.Any(frame => frame is null) || section.Kind != SectionKind.Artwork && !section.AnimationFrames.IsEmpty || !Enum.IsDefined(section.AnimationSource) || section.AnimationSource != ArtworkAnimationSource.Loop && section.AnimationFrames.IsEmpty)
+                throw new InvalidDataException("Animated artwork needs 2–32 frames in an artwork item.");
+            if (!double.IsFinite(section.AnimationMinimum) || !double.IsFinite(section.AnimationMaximum) || section.AnimationMinimum >= section.AnimationMaximum)
+                throw new InvalidDataException("Animated artwork needs a finite sensor range with a minimum below its maximum.");
+            if (!Enum.IsDefined(section.BarSource) || !double.IsFinite(section.BarMinimum) || !double.IsFinite(section.BarMaximum) || section.BarMinimum >= section.BarMaximum || section.BarSource != ArtworkBarSource.None && (section.Kind != SectionKind.Artwork || section.ImageData.Length > 0 || !section.AnimationFrames.IsEmpty || section.ArtworkFill || section.ShowName))
+                throw new InvalidDataException("Live bars need an artwork item with a supported sensor range and no other artwork content.");
+            if (!section.AnimationFrames.IsEmpty)
+            {
+                if (section.AnimationFrames.Length < 2 || section.ImageData.Length > 0 || section.ArtworkFill || section.ShowName || section.AnimationFrames.Sum(frame => (long)frame.Length) > 4_000_000)
+                    throw new InvalidDataException("Animated artwork must contain 2–32 PNG frames smaller than 3 MB total, with no other artwork content.");
+                foreach (string frame in section.AnimationFrames)
+                {
+                    byte[] bytes;
+                    try { bytes = Convert.FromBase64String(frame); }
+                    catch (FormatException error) { throw new InvalidDataException("An animated artwork frame is not valid Base64 PNG data.", error); }
+                    if (!bytes.AsSpan().StartsWith(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }))
+                        throw new InvalidDataException("Animated artwork frames must be PNG images.");
+                }
+            }
+            if (section.Kind == SectionKind.Artwork && (!double.IsFinite(section.ArtworkOpacity) || section.ArtworkOpacity is < 0 or > 1 || !double.IsFinite(section.ArtworkRadius) || section.ArtworkRadius is < 0 or > 100 || section.ArtworkFill && section.ImageData.Length > 0))
+                throw new InvalidDataException("Artwork opacity must be 0–100%, corner radius 0–100, and a color panel cannot also contain an image.");
+            if (section.Kind == SectionKind.Artwork && section.ImageData.Length > 0)
+            {
+                byte[] image;
+                try { image = Convert.FromBase64String(section.ImageData); }
+                catch (FormatException error) { throw new InvalidDataException("Artwork image data is not valid Base64 PNG data.", error); }
+                if (image.Length > 3_000_000 || !image.AsSpan().StartsWith(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }))
+                    throw new InvalidDataException("Artwork must contain a PNG image smaller than 3 MB.");
+            }
+            if (section.Kind != SectionKind.Artwork && !string.IsNullOrEmpty(section.ImageData))
+                throw new InvalidDataException("Only artwork items may contain image data.");
 
             if (!Enum.IsDefined(section.Layout) || !double.IsFinite(section.Padding) || section.Padding is < 0 or > 24 || !double.IsFinite(section.HeroSize) || section.HeroSize is < 0 or > 96)
                 throw new InvalidDataException("Select a valid metric layout, padding (0–24), and FPS emphasis size (0–96).");
@@ -183,7 +253,10 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
 
             Preferences parsed = JsonSerializer.Deserialize<Preferences>(json, options) ?? throw new InvalidDataException("Layout JSON is empty.");
 
-            return Validate(parsed.SchemaVersion is 2 or 3 ? parsed with { SchemaVersion = 4 } : parsed);
+            Preferences current = Validate(parsed.SchemaVersion is 2 or 3 ? parsed with { SchemaVersion = 4 } : parsed);
+            return current with { Sections = current.Sections.Select(section => section.AnimationSource == ArtworkAnimationSource.CpuTemperatureAlarm && section.AnimationMinimum == 69 && section.AnimationMaximum == 70 && !section.AlarmThresholdCustomized
+                ? section with { AnimationMinimum = 84, AnimationMaximum = 85, Name = section.Name == "CPU temperature alarm · 70°C" ? "CPU temperature alarm · 85°C" : section.Name }
+                : section).ToImmutableArray() };
 
         }
 

@@ -4,7 +4,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 /// <summary>Animated presentation surface for live overlay editing; its FPS is not a game benchmark.</summary>
 public sealed class OverlayTestWindow : Window

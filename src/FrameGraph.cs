@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 /// <summary>Scrolls actual QPC-timestamped samples with a two-second ETW delivery delay; never synthesizes frames.</summary>
 public sealed class FrameGraph : FrameworkElement

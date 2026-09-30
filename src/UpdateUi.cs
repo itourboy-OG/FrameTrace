@@ -5,7 +5,7 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Windows;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 public partial class MainWindow
 {

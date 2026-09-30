@@ -3,7 +3,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 public sealed record NamedLayout(string Name, Preferences Layout);
 

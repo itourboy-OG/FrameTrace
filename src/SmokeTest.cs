@@ -11,10 +11,214 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 public static class SmokeTest
 {
+    public static async Task RunArtworkAsync(string skinPath, string outputDirectory)
+    {
+        Directory.CreateDirectory(outputDirectory);
+        try
+        {
+            RtssArtwork skin = RtssArtworkImporter.Read(skinPath);
+            Require(skin.Sprites.Length == 26, "The supplied RTSS skin did not yield its decorated and plain still-image sprites.");
+            Require(skin.Animations.Length == 7, "The supplied RTSS sprite animations and temperature alarms were not recognized.");
+            Require(skin.LiveGraphs.Length == 4, "The supplied RTSS frame-time and hardware-load graphs were not recognized.");
+            Require(skin.LiveBars.Length == 5, "The supplied RTSS usage and temperature bars were not recognized.");
+            RtssSprite background = skin.Sprites.Single(item => item.Name.Contains("Background_02", StringComparison.Ordinal));
+            Require(background.Width == 280 && background.Height == 86 && background.Preview.PixelWidth == 280 && background.Preview.PixelHeight == 86 && skin.UnsupportedTables == 7, "The two-part RTSS background was not combined or empty tables were counted as missing artwork.");
+            PngBitmapEncoder backgroundImage = new(); backgroundImage.Frames.Add(BitmapFrame.Create(background.Preview));
+            using (FileStream file = File.Create(Path.Combine(outputDirectory, "rtss-combined-background.png"))) backgroundImage.Save(file);
+            string fragmentDirectory = Path.Combine(outputDirectory, "fragmented-test");
+            Directory.CreateDirectory(fragmentDirectory);
+            string fragmentedSkin = Path.Combine(fragmentDirectory, "fragmented.ovl");
+            File.WriteAllText(fragmentedSkin, "[Settings]\nEmbeddedImage=Bookmark.png\n[Table0]\nName=Parts\nLines=1\nLine0Name=<I=250,86,2,4,500,172><C><I=30,86,582,4,60,172>\n", System.Text.Encoding.Latin1);
+            File.Copy(Path.Combine(Path.GetDirectoryName(skinPath) ?? throw new InvalidDataException("RTSS test skin has no directory."), "Bookmark.png"), Path.Combine(fragmentDirectory, "Bookmark.png"), true);
+            RtssArtwork fragments = RtssArtworkImporter.Read(fragmentedSkin);
+            Require(fragments.Sprites.Length == 2 && fragments.Sprites[0].Width == 250 && fragments.Sprites[1].Width == 30 && fragments.UnsupportedTables == 0, "RTSS artwork separated by formatting was dropped or miscounted.");
+            ComboBox artworkChoices = new() { DisplayMemberPath = "Name", ItemsSource = skin.Sprites.Cast<object>().Concat(skin.Animations).ToArray(), SelectedIndex = 0 };
+            ComboBox graphChoices = new() { DisplayMemberPath = "Name", ItemsSource = skin.LiveGraphs.Cast<object>().Concat(skin.LiveBars).ToArray(), SelectedIndex = 0 };
+            artworkChoices.SetResourceReference(FrameworkElement.StyleProperty, "CaptureTargetStyle");
+            graphChoices.SetResourceReference(FrameworkElement.StyleProperty, "CaptureTargetStyle");
+            StackPanel selectors = new(); selectors.Children.Add(artworkChoices); selectors.Children.Add(graphChoices);
+            Window selectorHost = new() { Content = selectors, Width = 320, Height = 120, Left = -10000, Top = -10000, ShowInTaskbar = false, WindowStyle = WindowStyle.None };
+            try
+            {
+                selectorHost.Show(); selectorHost.UpdateLayout();
+                Require(VisualText(artworkChoices).Contains(skin.Sprites[0].Name), "The selected RTSS artwork showed its encoded image data instead of its name.");
+                Require(VisualText(graphChoices).Contains(skin.LiveGraphs[0].Name), "The selected RTSS graph showed record details instead of its name.");
+                graphChoices.SelectedItem = skin.LiveBars[0]; selectorHost.UpdateLayout();
+                Require(VisualText(graphChoices).Contains(skin.LiveBars[0].Name), "The selected RTSS bar showed record details instead of its name.");
+                artworkChoices.SelectedItem = skin.Animations[0]; selectorHost.UpdateLayout();
+                Require(VisualText(artworkChoices).Contains(skin.Animations[0].Name), "The selected RTSS animation showed frame data instead of its name.");
+            }
+            finally { selectorHost.Close(); }
+            RtssSprite sprite = skin.Sprites.Single(item => item.Name.Contains("BigIco_GPU", StringComparison.Ordinal));
+            SectionStyle item = new(SectionKind.Artwork, sprite.Name, "#83EFCD", "#FFFFFF", 24, 24, 0.02, 0.02, true, [])
+            {
+                Id = Guid.NewGuid().ToString("N"), ImageData = sprite.ImageData, ImageWidth = sprite.Width, ImageHeight = sprite.Height, ShowName = false
+            };
+            Preferences layout = Preferences.Validate(Preferences.Initial with { Sections = [item] });
+            Preferences restored = Preferences.Parse(JsonSerializer.Serialize(layout));
+            Require(restored.Sections[0].ImageData == sprite.ImageData, "Imported artwork did not survive a layout export/import round trip.");
+            OverlayCanvas canvas = new(); canvas.Apply(restored);
+            canvas.Measure(new Size(1920, 1080)); canvas.Arrange(new Rect(0, 0, 1920, 1080)); canvas.UpdateLayout();
+            Border imagePanel = canvas.Children.OfType<Border>().Single(panel => (string)panel.Tag == item.Key);
+            Require(imagePanel.Child is Image image && image.Source is not null && image.Width == sprite.Width, "The RTSS sprite did not render as an independent layer.");
+            RtssAnimation banner = skin.Animations.Single(animation => animation.Name.Contains("Banner_anim", StringComparison.Ordinal));
+            RtssAnimation fan = skin.Animations.Single(animation => animation.Name.Contains("Fans_anim", StringComparison.Ordinal));
+            Require(banner.Frames.Length == 4 && banner.Source == ArtworkAnimationSource.Loop && banner.Frames.Distinct().Count() > 1, "The animated banner frames were not cropped from the atlas.");
+            Require(fan.Frames.Length == 9 && fan.Source == ArtworkAnimationSource.GpuFan && fan.Frames.Distinct().Count() > 1, "The GPU fan frames were not cropped from the atlas.");
+            Require(skin.Animations.Count(animation => animation.Source is ArtworkAnimationSource.GpuUsage or ArtworkAnimationSource.CpuUsage or ArtworkAnimationSource.RamUsage) == 3, "The live GPU, CPU, and RAM load animations were not recognized.");
+            RtssAnimation gpuAlarm = skin.Animations.Single(animation => animation.Source == ArtworkAnimationSource.GpuTemperatureAlarm);
+            Require(gpuAlarm.Frames.Length == 2 && gpuAlarm.Frames[0] != gpuAlarm.Frames[1] && gpuAlarm.Minimum == 69 && gpuAlarm.Maximum == 70, "The white/red GPU alarm flames were not paired at 70°C.");
+            RtssAnimation cpuAlarm = skin.Animations.Single(animation => animation.Source == ArtworkAnimationSource.CpuTemperatureAlarm);
+            Require(cpuAlarm.Frames.Length == 2 && cpuAlarm.Minimum == 84 && cpuAlarm.Maximum == 85, "The CPU alarm did not use the 85°C default.");
+            SectionStyle oldCpuAlarm = new(SectionKind.Artwork, "CPU temperature alarm · 70°C", "#83EFCD", "#FFFFFF", 24, 24, 0.1, 0.1, true, [])
+            {
+                Id = Guid.NewGuid().ToString("N"), ShowName = false, AnimationFrames = cpuAlarm.Frames,
+                AnimationSource = ArtworkAnimationSource.CpuTemperatureAlarm, AnimationMinimum = 69, AnimationMaximum = 70
+            };
+            SectionStyle upgradedAlarm = Preferences.Parse(JsonSerializer.Serialize(Preferences.Initial with { Sections = [oldCpuAlarm] })).Sections.Single();
+            Require(upgradedAlarm.AnimationMaximum == 85 && upgradedAlarm.Name.EndsWith("85°C", StringComparison.Ordinal), "The saved 70°C CPU alarm was not upgraded.");
+            SectionStyle customizedAlarm = Preferences.Parse(JsonSerializer.Serialize(Preferences.Initial with { Sections = [oldCpuAlarm with { AlarmThresholdCustomized = true }] })).Sections.Single();
+            Require(customizedAlarm.AnimationMaximum == 70, "A user-selected 70°C threshold was overwritten.");
+            Require(skin.LiveGraphs.Any(item => item.Source == ArtworkGraphSource.RamUsage), "The live RAM load graph was not recognized.");
+            Require(OverlayData.Build([new("Total Memory", "Memory", "Memory", "Load", 95, "%")], FrameMetrics.Summarize([], Environment.TickCount64)).Single(section => section.Kind == SectionKind.Ram).Metrics.Single(metric => metric.Id == "used").Percent == 95, "The RAM graphics did not use total-memory load.");
+            RtssAnimation gpuUsage = skin.Animations.Single(animation => animation.Source == ArtworkAnimationSource.GpuUsage);
+            Require(gpuUsage.Frames.Length == 21 && gpuUsage.Minimum == 80 && gpuUsage.Maximum == 100, "The GPU load sprite range was not imported.");
+            SectionStyle animated = item with
+            {
+                Id = Guid.NewGuid().ToString("N"), Name = banner.Name, ImageData = "", AnimationFrames = banner.Frames,
+                AnimationSource = banner.Source, AnimationMinimum = banner.Minimum, AnimationMaximum = banner.Maximum,
+                ImageWidth = banner.Width, ImageHeight = banner.Height, X = 0.04
+            };
+            Preferences animatedLayout = Preferences.Parse(JsonSerializer.Serialize(Preferences.Validate(restored with { Sections = restored.Sections.Add(animated) })));
+            Require(animatedLayout.Sections[1].AnimationFrames.SequenceEqual(banner.Frames), "Imported animation did not survive layout export/import.");
+            canvas.Apply(animatedLayout);
+            Border animationPanel = canvas.Children.OfType<Border>().Single(panel => (string)panel.Tag == animated.Key);
+            Require(animationPanel.Child is Image animationImage && animationImage.Source is not null && animationImage.Width == banner.Width, "The RTSS animation did not render as an independent layer.");
+            RtssLiveGraph graph = skin.LiveGraphs.Single(item => item.Source == ArtworkGraphSource.FrameTime);
+            SectionStyle graphItem = Preferences.Initial.Sections.Single(section => section.Kind == SectionKind.Frames) with
+            {
+                Id = Guid.NewGuid().ToString("N"), Name = graph.Name, ShowName = false, Metrics = [], Graph = true,
+                GraphSource = graph.Source, GraphWidth = graph.Width, GraphHeight = graph.Height, GraphBelow = true, Padding = 0, X = 0.25, Y = 0.02
+            };
+            Preferences graphLayout = Preferences.Validate(animatedLayout with { Sections = animatedLayout.Sections.Add(graphItem) });
+            SectionStyle loadAnimation = animated with
+            {
+                Id = Guid.NewGuid().ToString("N"), Name = gpuUsage.Name, AnimationFrames = gpuUsage.Frames,
+                AnimationSource = gpuUsage.Source, AnimationMinimum = gpuUsage.Minimum, AnimationMaximum = gpuUsage.Maximum,
+                ImageWidth = gpuUsage.Width, ImageHeight = gpuUsage.Height, X = 0.07
+            };
+            graphLayout = Preferences.Validate(graphLayout with { Sections = graphLayout.Sections.Add(loadAnimation) });
+            RtssAnimation ramUsage = skin.Animations.Single(animation => animation.Source == ArtworkAnimationSource.RamUsage);
+            SectionStyle ramAnimation = animated with
+            {
+                Id = Guid.NewGuid().ToString("N"), Name = ramUsage.Name, AnimationFrames = ramUsage.Frames,
+                AnimationSource = ramUsage.Source, AnimationMinimum = ramUsage.Minimum, AnimationMaximum = ramUsage.Maximum,
+                ImageWidth = ramUsage.Width, ImageHeight = ramUsage.Height, X = 0.1
+            };
+            graphLayout = Preferences.Validate(graphLayout with { Sections = graphLayout.Sections.Add(ramAnimation) });
+            RtssLiveGraph gpuGraph = skin.LiveGraphs.Single(item => item.Source == ArtworkGraphSource.GpuUsage);
+            SectionStyle gpuGraphItem = Preferences.Initial.Sections.Single(section => section.Kind == SectionKind.Gpu) with
+            {
+                Id = Guid.NewGuid().ToString("N"), Name = gpuGraph.Name, ShowName = false, Metrics = [], Graph = true,
+                GraphSource = gpuGraph.Source, GraphWidth = gpuGraph.Width, GraphHeight = gpuGraph.Height,
+                GraphBelow = true, Padding = 0, X = 0.31, Y = 0.02
+            };
+            graphLayout = Preferences.Validate(graphLayout with { Sections = graphLayout.Sections.Add(gpuGraphItem) });
+            RtssLiveGraph ramGraph = skin.LiveGraphs.Single(item => item.Source == ArtworkGraphSource.RamUsage);
+            SectionStyle ramGraphItem = Preferences.Initial.Sections.Single(section => section.Kind == SectionKind.Ram) with
+            {
+                Id = Guid.NewGuid().ToString("N"), Name = ramGraph.Name, ShowName = false, Metrics = [], Graph = true,
+                GraphSource = ramGraph.Source, GraphWidth = ramGraph.Width, GraphHeight = ramGraph.Height,
+                GraphBelow = true, Padding = 0, X = 0.42, Y = 0.02
+            };
+            graphLayout = Preferences.Validate(graphLayout with { Sections = graphLayout.Sections.Add(ramGraphItem) });
+            RtssLiveBar gpuBar = skin.LiveBars.Single(item => item.Name == "GPU_ProgressBar_01");
+            RtssLiveBar temperatureBar = skin.LiveBars.Single(item => item.Name == "GPU_prbar_thermometer");
+            SectionStyle gpuBarItem = new(SectionKind.Artwork, gpuBar.Name, "#FFAA49", "#FFFFFF", 24, 24, 0.53, 0.02, true, [])
+            {
+                Id = Guid.NewGuid().ToString("N"), ShowName = false, BarSource = gpuBar.Source, BarMinimum = gpuBar.Minimum,
+                BarMaximum = gpuBar.Maximum, ImageWidth = gpuBar.Width, ImageHeight = gpuBar.Height
+            };
+            SectionStyle temperatureBarItem = gpuBarItem with
+            {
+                Id = Guid.NewGuid().ToString("N"), Name = temperatureBar.Name, BarSource = temperatureBar.Source,
+                BarMinimum = temperatureBar.Minimum, BarMaximum = temperatureBar.Maximum,
+                ImageWidth = temperatureBar.Width, ImageHeight = temperatureBar.Height, Y = 0.08
+            };
+            graphLayout = Preferences.Validate(graphLayout with { Sections = graphLayout.Sections.Add(gpuBarItem).Add(temperatureBarItem) });
+            SectionStyle alarmItem = animated with
+            {
+                Id = Guid.NewGuid().ToString("N"), Name = gpuAlarm.Name, AnimationFrames = gpuAlarm.Frames,
+                AnimationSource = gpuAlarm.Source, AnimationMinimum = gpuAlarm.Minimum, AnimationMaximum = gpuAlarm.Maximum,
+                ImageWidth = gpuAlarm.Width, ImageHeight = gpuAlarm.Height, Y = 0.13
+            };
+            graphLayout = Preferences.Validate(graphLayout with { Sections = graphLayout.Sections.Add(alarmItem) });
+            SectionStyle cpuAlarmItem = alarmItem with
+            {
+                Id = Guid.NewGuid().ToString("N"), Name = cpuAlarm.Name, AnimationSource = cpuAlarm.Source,
+                AnimationMinimum = cpuAlarm.Minimum, AnimationMaximum = cpuAlarm.Maximum, Y = 0.18
+            };
+            graphLayout = Preferences.Validate(graphLayout with { Sections = graphLayout.Sections.Add(cpuAlarmItem) });
+            canvas.Apply(graphLayout);
+            canvas.Measure(new Size(1920, 1080)); canvas.Arrange(new Rect(0, 0, 1920, 1080)); canvas.UpdateLayout();
+            Require(Descendants(canvas).OfType<FrameGraph>().Any(), "The RTSS frame-time graph did not become a live Frame Trace graph.");
+            Border gpuFill = Descendants(canvas).OfType<Border>().Single(item => AutomationProperties.GetAutomationId(item) == "RtssBarFill_" + gpuBarItem.Key);
+            Border temperatureFill = Descendants(canvas).OfType<Border>().Single(item => AutomationProperties.GetAutomationId(item) == "RtssBarFill_" + temperatureBarItem.Key);
+            Image alarmImage = (Image)canvas.Children.OfType<Border>().Single(panel => (string)panel.Tag == alarmItem.Key).Child;
+            BitmapSource coolFlame = (BitmapSource)alarmImage.Source;
+            Image cpuAlarmImage = (Image)canvas.Children.OfType<Border>().Single(panel => (string)panel.Tag == cpuAlarmItem.Key).Child;
+            BitmapSource coolCpuFlame = (BitmapSource)cpuAlarmImage.Source;
+            canvas.UpdateData(OverlayData.Build([new("Test GPU", "GpuAmd", "GPU Core", "Load", 10, "%"), new("Test GPU", "GpuAmd", "GPU Core", "Temperature", 60, "°C"), new("Test CPU", "Cpu", "CPU Package", "Temperature", 84, "°C")], FrameMetrics.Summarize([], Environment.TickCount64)));
+            Require(ReferenceEquals(coolFlame, alarmImage.Source), "The GPU alarm changed below 70°C.");
+            Require(ReferenceEquals(coolCpuFlame, cpuAlarmImage.Source), "The CPU alarm changed below 85°C.");
+            Require(gpuFill.Width > 0 && gpuFill.Width < gpuBar.Width && temperatureFill.Width > 0 && temperatureFill.Width < temperatureBar.Width, "Imported RTSS usage or thermometer bars did not follow live sensor readings.");
+            Image gpuImage = (Image)canvas.Children.OfType<Border>().Single(panel => (string)panel.Tag == loadAnimation.Key).Child;
+            BitmapSource unloadedFrame = (BitmapSource)gpuImage.Source;
+            Image ramImage = (Image)canvas.Children.OfType<Border>().Single(panel => (string)panel.Tag == ramAnimation.Key).Child;
+            BitmapSource unloadedRamFrame = (BitmapSource)ramImage.Source;
+            canvas.UpdateData(OverlayData.Build([new("Test GPU", "GpuAmd", "GPU Core", "Load", 95, "%"), new("Test GPU", "GpuAmd", "GPU Core", "Temperature", 60, "°C"), new("Total Memory", "Memory", "Memory", "Load", 95, "%")], FrameMetrics.Summarize([], Environment.TickCount64)));
+            canvas.UpdateData(OverlayData.Build([new("Test GPU", "GpuAmd", "GPU Core", "Load", 95, "%"), new("Test GPU", "GpuAmd", "GPU Core", "Temperature", 70, "°C"), new("Test CPU", "Cpu", "CPU Package", "Temperature", 85, "°C"), new("Total Memory", "Memory", "Memory", "Load", 95, "%")], FrameMetrics.Summarize([], Environment.TickCount64)));
+            Require(!ReferenceEquals(coolFlame, alarmImage.Source), "The GPU alarm did not turn red at 70°C.");
+            Require(!ReferenceEquals(coolCpuFlame, cpuAlarmImage.Source), "The CPU alarm did not turn red at 85°C.");
+            Require(Math.Abs(gpuFill.Width - gpuBar.Width) < 0.01, "The imported GPU usage bar did not reach its full range at 95% load.");
+            Require(!ReferenceEquals(unloadedFrame, gpuImage.Source), "The imported GPU load animation did not follow a live 95% reading.");
+            Require(!ReferenceEquals(unloadedRamFrame, ramImage.Source), "The imported RAM load animation did not follow a live 95% reading.");
+            Require(Descendants(canvas).OfType<System.Windows.Shapes.Polyline>().Any(line => AutomationProperties.GetAutomationId(line) == "UsageTrend_" + gpuGraphItem.Key && line.Points.Count >= 2), "The RTSS GPU graph did not draw a live 95% load reading.");
+            Require(Descendants(canvas).OfType<System.Windows.Shapes.Polyline>().Any(line => AutomationProperties.GetAutomationId(line) == "UsageTrend_" + ramGraphItem.Key && line.Points.Count >= 2), "The RTSS RAM graph did not draw a live 95% load reading.");
+            SavePresetImage(canvas, Path.Combine(outputDirectory, "rtss-artwork.png"));
+            Image animatedImage = (Image)animationPanel.Child;
+            BitmapSource firstFrame = (BitmapSource)animatedImage.Source;
+            Window host = new() { Content = canvas, Width = 64, Height = 64, Left = -10000, Top = -10000, ShowInTaskbar = false, WindowStyle = WindowStyle.None };
+            try
+            {
+                host.Show();
+                await Task.Delay(650);
+                Require(!ReferenceEquals(firstFrame, animatedImage.Source), "The RTSS banner did not advance while its overlay was visible.");
+                Preferences loopingLayout = graphLayout with { Sections = graphLayout.Sections.Select(section => section.Key == loadAnimation.Key ? section with { AnimationSource = ArtworkAnimationSource.Loop } : section).ToImmutableArray() };
+                canvas.Apply(loopingLayout);
+                Image loopingImage = (Image)canvas.Children.OfType<Border>().Single(panel => (string)panel.Tag == loadAnimation.Key).Child;
+                BitmapSource loopStart = (BitmapSource)loopingImage.Source;
+                await Task.Delay(650);
+                Require(!ReferenceEquals(loopStart, loopingImage.Source), "A sensor-driven RTSS sprite did not animate when changed to continuous playback.");
+                canvas.Apply(graphLayout with { ReduceMotion = true });
+                Image reducedImage = (Image)canvas.Children.OfType<Border>().Single(panel => (string)panel.Tag == animated.Key).Child;
+                BitmapSource reducedFrame = (BitmapSource)reducedImage.Source;
+                await Task.Delay(400);
+                Require(ReferenceEquals(reducedFrame, reducedImage.Source), "Reduce motion did not pause the imported animation.");
+            }
+            finally { host.Close(); }
+            File.WriteAllText(Path.Combine(outputDirectory, "result.txt"), $"PASS: {skin.Sprites.Length} still images, {skin.Animations.Length} sprite animations, {skin.LiveGraphs.Length} live graphs, and {skin.LiveBars.Length} live bars loaded; {skin.UnsupportedTables} advanced tables left unconverted; portable layout round trip and visible layers verified.");
+        }
+        catch (Exception error)
+        {
+            File.WriteAllText(Path.Combine(outputDirectory, "result.txt"), "FAIL\n" + error);
+            Environment.ExitCode = 1;
+        }
+    }
     public static async Task RunProbeAsync(string title)
     {
         TextBlock content = new() { Text = title, FontSize = 32 };
@@ -72,14 +276,16 @@ public static class SmokeTest
                 Preferences styled = Preferences.Validate(LayoutPresets.Create(Preferences.Initial, preset));
                 Preferences restored = Preferences.Parse(JsonSerializer.Serialize(styled));
                 Require(restored.Sections.Zip(styled.Sections).All(pair => pair.First.Layout == pair.Second.Layout && pair.First.HeroSize == pair.Second.HeroSize && pair.First.Padding == pair.Second.Padding && pair.First.GraphBelow == pair.Second.GraphBelow && pair.First.TextShadow == pair.Second.TextShadow), "Preset styling did not survive serialization.");
+                Require(restored.Sections.Zip(styled.Sections).All(pair => pair.First.ThemeCard == pair.Second.ThemeCard && pair.First.UsageGauge == pair.Second.UsageGauge && pair.First.UsageBar == pair.Second.UsageBar && pair.First.FanWidget == pair.Second.FanWidget), "A graphical theme lost its widgets when exported.");
             }
             Require(FrameMetrics.Summarize([a, b, generated with { FrameType = "Intel XeSS-FG" }], 120).Generation == "Intel XeSS-FG reported", "XeSS-FG tags were not identified.");
+            ImmutableArray<SensorReading> realSensors;
             using (HardwareMonitor hardware = await Task.Run(() => new HardwareMonitor()))
             {
                 await Task.Delay(1100);
-                ImmutableArray<SensorReading> sensors = await Task.Run(hardware.Read);
-                Require(sensors.Any(s => s.Value.HasValue), "No real hardware sensor values.");
-                File.WriteAllText(Path.Combine(outputDirectory, "sensors.json"), JsonSerializer.Serialize(sensors));
+                realSensors = await Task.Run(hardware.Read);
+                Require(realSensors.Any(s => s.Value.HasValue), "No real hardware sensor values.");
+                File.WriteAllText(Path.Combine(outputDirectory, "sensors.json"), JsonSerializer.Serialize(realSensors));
             }
             window = new MainWindow();
             Application.Current.MainWindow = window;
@@ -131,6 +337,7 @@ public static class SmokeTest
                 Require(Math.Abs(window.AnimatedBackground.Phase - tracePosition) > 0.001, "The full-window gaming background did not move.");
             }
             CheckCanvasEditing();
+            CheckUsageBar(outputDirectory);
             CheckTableLabelStability();
             CheckSavedPresets(outputDirectory);
             CheckDataMigration(outputDirectory);
@@ -146,6 +353,7 @@ public static class SmokeTest
                 Require(FrameMetrics.SelectForeground(candidates, Environment.ProcessId, [], -1)?.ProcessId == Environment.ProcessId, "Foreground renderer was not selected.");
                 Require(FrameMetrics.SelectForeground(candidates, Environment.ProcessId, [], Environment.ProcessId) is null, "Dashboard was selected as a game.");
                 Require(FrameMetrics.SelectForeground(candidates, Environment.ProcessId, [Path.GetFileName(Environment.ProcessPath!)], -1) is null, "Ignore rule failed.");
+                Require(CaptureRules.Ignore(["peak.exe"], "PEAK.EXE").Length == 1 && CaptureRules.Allow(["peak.exe", "game.exe"], "PEAK.EXE").SequenceEqual(["game.exe"]), "Dashboard capture rules must match executable names without case sensitivity.");
                 Require(captured.AppFps > 0, "Real ETW capture returned no FPS.");
             }
             int foregroundChecks = 0, observedSamples = 0;
@@ -153,6 +361,8 @@ public static class SmokeTest
             foreach (string probeName in new[] { "Frame Trace probe one", "Frame Trace probe two" })
             {
                 ProcessStartInfo start = new(Environment.ProcessPath!) { UseShellExecute = false };
+                if (Path.GetFileNameWithoutExtension(start.FileName).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+                    start.ArgumentList.Add(typeof(App).Assembly.Location);
                 start.ArgumentList.Add("--capture-probe"); start.ArgumentList.Add(probeName);
                 using Process probe = Process.Start(start) ?? throw new InvalidOperationException("Cannot start renderer probe.");
                 try
@@ -180,6 +390,7 @@ public static class SmokeTest
                     CaptureTarget manual = targetSelector.Items.Cast<CaptureTarget>().Single(item => item.ProcessId == probe.Id);
                     Require(!targetSelector.Items.Cast<CaptureTarget>().Any(item => item.ProcessId == Environment.ProcessId), "Process picker included its own dashboard.");
                     targetSelector.SelectedItem = manual;
+                    Require(FindButton(window, "IgnoreCaptureButton").IsEnabled && !FindButton(window, "AllowCaptureButton").IsEnabled, "Dashboard capture-rule actions did not reflect the selected application.");
                     window.Activate();
                     await Task.Delay(400);
                     string manualPath = Path.Combine(outputDirectory, probeName + "-manual.json");
@@ -225,10 +436,11 @@ public static class SmokeTest
             window.Activate();
             await window.Dispatcher.InvokeAsync(() => window.UpdateLayout(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             ComboBox capturePicker = (ComboBox)window.FindName("CaptureTargetSelector");
+            window.RefreshCaptureTargets();
             capturePicker.IsDropDownOpen = true;
             await Task.Delay(200);
             Popup popup = (Popup)capturePicker.Template.FindName("PART_Popup", capturePicker);
-            Require(Math.Abs(popup.Child.RenderSize.Width - capturePicker.ActualWidth) < 2, $"Capture popup width differs from its control: popup={popup.Child.RenderSize.Width:0.##}, control={capturePicker.ActualWidth:0.##}.");
+            Require(Math.Abs(popup.Child.RenderSize.Width - capturePicker.ActualWidth) < 2, $"Capture popup width differs from its control: open={popup.IsOpen}, pickerOpen={capturePicker.IsDropDownOpen}, visible={popup.Child.IsVisible}, popup={popup.Child.RenderSize.Width:0.##}, control={capturePicker.ActualWidth:0.##}.");
             Point popupOrigin = popup.Child.PointToScreen(new Point());
             Point pickerOrigin = capturePicker.PointToScreen(new Point());
             Require(Math.Abs(popupOrigin.X - pickerOrigin.X) < 2, "Capture popup is offset outside its control.");
@@ -262,14 +474,41 @@ public static class SmokeTest
             Require(itemCanvas.Selection.Contains(separate.Key), "Separate metric could not be selected on the canvas.");
             FindButton(window, "RemoveOverlayItemButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Require(items.Items.Count == originalCount + 1 && !itemCanvas.Children.OfType<Border>().Any(panel => (string)panel.Tag == separate.Key), "Removing a separate metric left its renderer behind.");
+            ((TabControl)window.FindName("StudioInspectorTabs")).SelectedItem = ((TabControl)window.FindName("StudioInspectorTabs")).Items.Cast<TabItem>().Single(tab => AutomationProperties.GetAutomationId(tab) == "StudioArtworkTab");
+            window.UpdateLayout();
+            Descendants(window).OfType<Button>().Single(button => AutomationProperties.GetAutomationId(button) == "AddTextLayer").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            SectionStyle textLayer = (SectionStyle)items.SelectedItem;
+            Require(textLayer.Kind == SectionKind.Artwork && textLayer.ImageData.Length == 0 && items.Items.Count == originalCount + 2, "A freeform text layer was not added.");
+            ((TextBox)window.FindName("SectionName")).Text = "My custom caption";
+            Border textPanel = itemCanvas.Children.OfType<Border>().Single(panel => (string)panel.Tag == textLayer.Key);
+            Require(textPanel.Child is TextBlock caption && caption.Text == "My custom caption", "Text layer edits did not reach the canvas.");
+            Descendants(window).OfType<Button>().Single(button => AutomationProperties.GetAutomationId(button) == "LayerBackward").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Require(((SectionStyle)items.SelectedItem).Key == textLayer.Key, "Reordering a layer changed the selected item.");
+            FindButton(window, "RemoveOverlayItemButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Require(items.Items.Count == originalCount + 1, "Removing an artwork layer left it in the layout.");
+            Descendants(window).OfType<Button>().Single(button => AutomationProperties.GetAutomationId(button) == "AddColorPanel").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            SectionStyle colorPanel = (SectionStyle)items.SelectedItem;
+            Border shape = itemCanvas.Children.OfType<Border>().Single(panel => (string)panel.Tag == colorPanel.Key);
+            Require(colorPanel.ArtworkFill && shape.Width == 300 && shape.Height == 150 && shape.Background is SolidColorBrush, "A resizable color panel was not rendered.");
+            Require(itemCanvas.SectionAt(shape) == colorPanel.Key, "The canvas did not identify the selected artwork.");
+            ContextMenu itemMenu = window.CreateCanvasMenu(colorPanel.Key);
+            itemMenu.Items.OfType<MenuItem>().Single(item => AutomationProperties.GetAutomationId(item) == "CanvasDuplicateItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            SectionStyle duplicate = (SectionStyle)items.SelectedItem;
+            Require(duplicate.Key != colorPanel.Key && items.Items.Count == originalCount + 3, "The canvas menu did not duplicate the selected artwork.");
+            itemMenu = window.CreateCanvasMenu(colorPanel.Key);
+            itemMenu.Items.OfType<MenuItem>().Single(item => AutomationProperties.GetAutomationId(item) == "CanvasRemoveItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Require(items.Items.Count == originalCount + 2 && !itemCanvas.Children.OfType<Border>().Any(panel => (string)panel.Tag == colorPanel.Key), "The canvas menu did not remove the clicked artwork.");
+            itemMenu = window.CreateCanvasMenu(duplicate.Key);
+            itemMenu.Items.OfType<MenuItem>().Single(item => AutomationProperties.GetAutomationId(item) == "CanvasRemoveItem").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
             await CheckUnsavedLayoutAsync(window, outputDirectory);
             ComboBox presets = (ComboBox)window.FindName("PresetSelector");
             ((Slider)window.FindName("ZoomSlider")).Value = 100;
             foreach (string preset in LayoutPresets.Names)
             {
-                presets.SelectedItem = preset;
+                presets.SelectedItem = presets.Items.Cast<LayoutPresets.Choice>().Single(item => item.Name == preset);
                 Button apply = FindButton(window, "ApplyPresetButton");
                 apply.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                FindButton(window, "FitItemsButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 await Task.Delay(100);
                 SaveImage(window, Path.Combine(outputDirectory, preset.Replace(" ", "-") + ".png"));
                 OverlayCanvas presetCanvas = (OverlayCanvas)((ScrollViewer)window.FindName("PreviewViewport")).Content;
@@ -285,7 +524,14 @@ public static class SmokeTest
                         for (int j = i + 1; j < bounds.Length; j++)
                             Require(!bounds[i].IntersectsWith(bounds[j]), "Preset sections overlap: " + preset);
                 }
-                SavePresetImage(presetCanvas, Path.Combine(outputDirectory, preset.Replace(" ", "-") + "-detail.png"));
+                if (preset == "Signal panels")
+                {
+                    FindButton(window, "FitItemsButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    ScrollViewer itemViewport = (ScrollViewer)window.FindName("PreviewViewport");
+                    Rect content = presetCanvas.VisibleBounds();
+                    double scale = ((ScaleTransform)presetCanvas.LayoutTransform).ScaleX;
+                    Require(content.Width * scale <= itemViewport.ActualWidth && content.Height * scale <= itemViewport.ActualHeight, "Fit items did not show the complete graphical layout.");
+                }
             }
             presets.SelectedIndex = 0; FindButton(window, "ApplyPresetButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             ScrollViewer viewport = (ScrollViewer)window.FindName("PreviewViewport");
@@ -313,6 +559,28 @@ public static class SmokeTest
             window.UpdateLayout();
             SaveImage(window, Path.Combine(outputDirectory, "studio.png"));
             await CheckLiveEditingAsync(window, outputDirectory);
+            ((TabControl)window.FindName("Pages")).SelectedIndex = 1;
+            ComboBox allItems = (ComboBox)window.FindName("SectionSelector");
+            Button removeItem = FindButton(window, "RemoveOverlayItemButton");
+            while (allItems.Items.Count > 0)
+            {
+                int previous = allItems.Items.Count;
+                removeItem.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Require(allItems.Items.Count == previous - 1, "The final overlay item could not be removed.");
+            }
+            OverlayCanvas emptyCanvas = (OverlayCanvas)((ScrollViewer)window.FindName("PreviewViewport")).Content;
+            Require(emptyCanvas.VisibleBounds().IsEmpty && emptyCanvas.Children.OfType<Border>().Count() == 0, "The empty layout still rendered an overlay item.");
+            SaveImage(window, Path.Combine(outputDirectory, "empty-canvas.png"));
+            Preferences emptyLayout = Preferences.Parse(JsonSerializer.Serialize(Preferences.Validate(Preferences.Initial with { Sections = [] })));
+            Require(emptyLayout.Sections.IsEmpty, "An empty overlay did not survive saving and loading.");
+            Descendants(window).OfType<Button>().Single(button => AutomationProperties.GetAutomationId(button) == "AddGameInfo").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Require(allItems.Items.Count == 1 && ((SectionStyle)allItems.SelectedItem).Kind == SectionKind.Game, "A new game-info item could not be added after clearing the canvas.");
+            emptyCanvas.UpdateGameInfo("PEAK", "DXGI", RunningApplications.Icon(Environment.ProcessId));
+            Require(VisualText(emptyCanvas).Contains("PEAK") && VisualText(emptyCanvas).Contains("DXGI"), "The game name or verified presentation API was not shown.");
+            window.UpdateLayout();
+            Border gamePanel = emptyCanvas.Children.OfType<Border>().Single();
+            Require(gamePanel.Visibility == Visibility.Visible && gamePanel.DesiredSize.Width > 0 && !emptyCanvas.VisibleBounds().IsEmpty, "The game-info item did not become visible on the canvas.");
+            SaveImage(window, Path.Combine(outputDirectory, "game-info-layer.png"));
             ((TabControl)window.FindName("Pages")).SelectedIndex = 2;
             await Task.Delay(150);
             SaveImage(window, Path.Combine(outputDirectory, "settings.png"));
@@ -324,7 +592,7 @@ public static class SmokeTest
             Preferences.Write(Preferences.Initial, Path.Combine(outputDirectory, "layout.json"));
             Require(Preferences.Parse(File.ReadAllText(Path.Combine(outputDirectory, "layout.json"))).Sections.Length == 4, "Layout round trip failed.");
             await CloseAsync(window); window = null;
-            File.WriteAllText(Path.Combine(outputDirectory, "result.txt"), $"PASS: frame calculations, stale data, swap-chain isolation, real sensors, real ETW capture ({captured.AppFps:0.0} FPS), capture restart with fresh frames and released old session, two real renderer processes, manual selection while dashboard is active, process exit and return to Automatic, {observedSamples}/40 nonempty FPS snapshots (occluded windows may stop rendering), {foregroundChecks} foreground routing checks (focus-dependent), ignore rules, custom labels, five presets with table/tile/hero styling round trips and non-overlap checks at 1920/3440 widths, average/1% lows, monitor-sized canvas, 100% zoom, cropped overlay, marquee/group movement, grid snapping and Ctrl bypass, saved overlay scaling, bounded popup placement, named preset save/replace/reload, separate metric add/remove, independent label sizes, schema migration, dynamic technology fields, minimum-size studio controls, UI renders, clean shutdown.\nPEAK/OptiScaler, Cyberpunk, AFMF, NVIDIA hardware, and exclusive fullscreen have not been validated.");
+            File.WriteAllText(Path.Combine(outputDirectory, "result.txt"), $"PASS: frame calculations, stale data, swap-chain isolation, real sensors, real ETW capture ({captured.AppFps:0.0} FPS), capture restart with fresh frames and released old session, two real renderer processes, manual selection while dashboard is active, process exit and return to Automatic, {observedSamples}/40 nonempty FPS snapshots (occluded windows may stop rendering), {foregroundChecks} foreground routing checks (focus-dependent), ignore rules, custom labels, {LayoutPresets.Names.Length} presets with table/tile/hero styling round trips and non-overlap checks at 1920/3440 widths, average/1% lows, monitor-sized canvas, 100% zoom, cropped overlay, marquee/group movement, grid snapping and Ctrl bypass, saved overlay scaling, bounded popup placement, named preset save/replace/reload, separate metric add/remove, independent label sizes, schema migration, dynamic technology fields, minimum-size studio controls, UI renders, clean shutdown.\nPEAK/OptiScaler, Cyberpunk, AFMF, NVIDIA hardware, and exclusive fullscreen have not been validated.");
         }
         catch (Exception error)
         {
@@ -440,7 +708,10 @@ public static class SmokeTest
             await Task.Delay(2000);
             ((TabControl)window.FindName("Pages")).SelectedIndex = 1;
             await Task.Delay(200);
+            CheckUsageBar(outputDirectory);
+            CheckSignalPanels(outputDirectory);
             await CheckLiveEditingAsync(window, outputDirectory);
+            CheckThemeWidgetsEditor(window, outputDirectory);
             File.WriteAllText(Path.Combine(outputDirectory, "result.txt"), "PASS: live test window, overlay visibility while editing, label updates before saving, closing and reopening, Stop test, restoring saved layout, and preserving preferences. FPS capture is verified separately.");
         }
         catch (Exception error)
@@ -518,7 +789,11 @@ public static class SmokeTest
         TextBlock notice = (TextBlock)window.FindName("UnsavedLayoutNotice");
         name.Text = "KEEP MY EDITS";
         Require(notice.Visibility == Visibility.Visible, "Editing a layout did not show the unsaved indicator.");
-        ((ComboBox)window.FindName("PresetSelector")).SelectedItem = "Classic RTSS";
+        FindButton(window, "UndoStudioButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Require(name.Text != "KEEP MY EDITS", "Undo did not restore the preceding overlay layout.");
+        name.Text = "KEEP MY EDITS";
+        ComboBox presets = (ComboBox)window.FindName("PresetSelector");
+        presets.SelectedItem = presets.Items.Cast<LayoutPresets.Choice>().Single(item => item.Name == "Classic RTSS");
         Task keep = RespondToLayoutPromptAsync("7");
         FindButton(window, "ApplyPresetButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await keep;
@@ -559,6 +834,9 @@ public static class SmokeTest
     });
     private static async Task CheckCustomPresetDropdownAsync(MainWindow window, string directory)
     {
+        TabControl inspector = (TabControl)window.FindName("StudioInspectorTabs");
+        inspector.SelectedItem = inspector.Items.Cast<TabItem>().Single(item => AutomationProperties.GetAutomationId(item) == "StudioLayoutsTab");
+        window.UpdateLayout();
         ComboBox selector = (ComboBox)window.FindName("CustomPresetSelector");
         Button delete = (Button)window.FindName("DeleteCustomPresetButton");
         Button load = (Button)window.FindName("LoadCustomPresetButton");
@@ -585,6 +863,9 @@ public static class SmokeTest
         canvas.EnableEditing(); canvas.Apply(Preferences.Initial);
         Border[] panels = canvas.Children.OfType<Border>().ToArray();
         Border first = panels[0];
+        Require(canvas.SectionAt(first) == (string)first.Tag, "Canvas hit testing missed the selected item.");
+        canvas.SelectItem((string)first.Tag);
+        Require(canvas.Selection.SequenceEqual([(string)first.Tag]), "Right-click selection did not isolate its item.");
         canvas.SelectRegion(new Rect(Canvas.GetLeft(first), Canvas.GetTop(first), first.DesiredSize.Width, first.DesiredSize.Height));
         Require(canvas.Selection.Contains((string)first.Tag), "Marquee did not select its section.");
         canvas.SelectAll(); Require(canvas.Selection.Length == 4, "Select all missed sections.");
@@ -617,6 +898,137 @@ public static class SmokeTest
         technology.UpdateData(OverlayData.Build([], FrameMetrics.Summarize([], 0)));
         Require(technology.VisibleBounds().IsEmpty, "Stale generation did not hide again.");
         Require(Math.Abs(first.DesiredSize.Width / normal.Width - 2) < 0.01 && Math.Abs(first.DesiredSize.Height / normal.Height - 2) < 0.01, "Overlay size did not scale real content.");
+    }
+    private static void CheckSignalPanels(string outputDirectory)
+    {
+        Preferences layout = Preferences.Validate(LayoutPresets.Create(Preferences.Initial, "Signal panels"));
+        OverlayCanvas canvas = new() { Width = 1920, Height = 1080 };
+        canvas.Apply(layout);
+        canvas.Apply(canvas.ArrangePreset("Signal panels"));
+        ImmutableArray<SensorReading> sensors =
+        [
+            new("Test GPU", "GpuAmd", "GPU Core", "Load", 30, "%"),
+            new("Test GPU", "GpuAmd", "GPU Core", "Temperature", 62, "°C"),
+            new("Test GPU", "GpuAmd", "GPU Package", "Power", 158, "W"),
+            new("Test GPU", "GpuAmd", "GPU Core", "Clock", 2440, "MHz"),
+            new("Test GPU", "GpuAmd", "GPU Memory Used", "SmallData", 6144, "MB"),
+            new("Test CPU", "Cpu", "CPU Total", "Load", 48, "%"),
+            new("Test CPU", "Cpu", "Core (Tctl/Tdie)", "Temperature", 66, "°C"),
+            new("Test CPU", "Cpu", "Package", "Power", 82, "W"),
+            new("Total Memory", "Memory", "Memory Used", "Data", 17.2, "GB")
+        ];
+        FrameSummary frames = new(142, 142, 7.0, "Unavailable", "", []) { AverageFps = 136, LowFps = 91 };
+        canvas.UpdateData(OverlayData.Build(sensors, frames));
+        canvas.UpdateData(OverlayData.Build(sensors.SetItem(0, sensors[0] with { Value = 75 }).SetItem(5, sensors[5] with { Value = 56 }), frames));
+        System.Windows.Shapes.Polyline gpuTrend = Descendants(canvas).OfType<System.Windows.Shapes.Polyline>().Single(item => AutomationProperties.GetAutomationId(item) == "UsageTrend_Gpu");
+        Require(gpuTrend.Points.Count == 2 && gpuTrend.Points[1].Y < gpuTrend.Points[0].Y, "The graphical GPU trace did not reflect changing sensor load.");
+        double end = Stopwatch.GetTimestamp() * 1000d / Stopwatch.Frequency - 2000;
+        canvas.Apply(canvas.ArrangePreset("Signal panels"));
+        canvas.UpdateGraph(Enumerable.Range(0, 50).Select(index => new FramePoint(end - 9800 + index * 200, 7 + Math.Sin(index * 0.6) * 2)).ToImmutableArray());
+        Rect[] cards = canvas.Children.OfType<Border>().Where(panel => panel.Visibility == Visibility.Visible).Select(panel => new Rect(Canvas.GetLeft(panel), Canvas.GetTop(panel), panel.DesiredSize.Width, panel.DesiredSize.Height)).ToArray();
+        Require(cards.Length == 4 && cards.All(card => card.Right <= canvas.Width && card.Bottom <= canvas.Height), "Graphical cards exceed the display.");
+        for (int i = 0; i < cards.Length; i++)
+            for (int j = i + 1; j < cards.Length; j++)
+                Require(!cards[i].IntersectsWith(cards[j]), "Graphical cards overlap.");
+        canvas.Measure(new Size(canvas.Width, canvas.Height));
+        canvas.Arrange(new Rect(0, 0, canvas.Width, canvas.Height));
+        SavePresetImage(canvas, Path.Combine(outputDirectory, "Signal-panels-live-sample.png"));
+    }
+    private static void CheckUsageBar(string outputDirectory)
+    {
+        SectionStyle gpu = Preferences.Initial.Sections.Single(section => section.Kind == SectionKind.Gpu) with
+        {
+            UsageBar = true, UsageBarWidth = 220, ShowName = false, Metrics = []
+        };
+        Preferences layout = Preferences.Initial with { Sections = [gpu] };
+        Require(Preferences.Parse(JsonSerializer.Serialize(layout)).Sections[0].UsageBarWidth == 220, "Live bar settings did not survive a saved layout.");
+        OverlayCanvas canvas = new(); canvas.Apply(layout);
+        Require(canvas.VisibleBounds().IsEmpty, "Live bar showed a fabricated reading without a sensor.");
+        ImmutableArray<SensorReading> readings = [new("Test GPU", "GpuAmd", "GPU Core", "Load", 65, "%")];
+        canvas.UpdateData(OverlayData.Build(readings, FrameMetrics.Summarize([], 0)));
+        Border track = Descendants(canvas).OfType<Border>().Single(item => (string?)item.Tag == "UsageBar:" + gpu.Key);
+        Border fill = (Border)track.Child;
+        Require(Math.Abs(fill.Width - 143) < 0.01 && !canvas.VisibleBounds().IsEmpty, "Live bar did not render 65% from the actual GPU load reading.");
+        canvas.Apply(layout with { Sections = [gpu with { ShowName = true, Metrics = ["usage"] }] });
+        canvas.UpdateData(OverlayData.Build(readings, FrameMetrics.Summarize([], 0)));
+        canvas.Measure(new Size(canvas.Width, canvas.Height));
+        canvas.Arrange(new Rect(0, 0, canvas.Width, canvas.Height));
+        SavePresetImage(canvas, Path.Combine(outputDirectory, "live-usage-bar.png"));
+        SectionStyle withFan = gpu with { ShowName = true, Metrics = ["usage"], FanWidget = true, FanSize = 50 };
+        Require(Preferences.Parse(JsonSerializer.Serialize(layout with { Sections = [withFan] })).Sections[0].FanWidget, "Animated fan setting did not survive a saved layout.");
+        OverlayWindow live = new(layout with { Sections = [withFan] });
+        live.UpdateData(OverlayData.Build([readings[0], new("Test GPU", "GpuAmd", "GPU Fan", "Fan", 1200, "RPM")], FrameMetrics.Summarize([], 0)));
+        Border livePanel = live.Surface.Children.OfType<Border>().Single();
+        Border liveTrack = Descendants(livePanel).OfType<Border>().Single(item => (string?)item.Tag == "UsageBar:" + withFan.Key);
+        TextBlock liveFanReading = Descendants(livePanel).OfType<TextBlock>().Single(text => text.Text.StartsWith("FAN  ", StringComparison.Ordinal));
+        live.ShowOnMonitor(Desktop.Displays().Single(display => display.Primary).Bounds);
+        live.UpdateLayout();
+        StackPanel liveWidget = (StackPanel)liveFanReading.Parent;
+        Require(liveFanReading.Text == "FAN  1200 RPM" && liveWidget.DesiredSize.Width >= 50 + liveFanReading.DesiredSize.Width && livePanel.DesiredSize.Width >= liveTrack.Width + livePanel.Padding.Left + livePanel.Padding.Right && live.ActualWidth >= livePanel.DesiredSize.Width, "The live overlay clipped its usage bar or fan reading.");
+        SaveImage(live, Path.Combine(outputDirectory, "live-fan.png"));
+        live.Close();
+        canvas.Apply(layout);
+        canvas.UpdateData(OverlayData.Build([], FrameMetrics.Summarize([], 0)));
+        Require(canvas.VisibleBounds().IsEmpty, "Live bar did not hide when its sensor became unavailable.");
+        try { Preferences.Validate(layout with { Sections = [gpu with { UsageBarWidth = 501 }] }); throw new InvalidDataException("Invalid live bar width was accepted."); }
+        catch (InvalidDataException error) when (error.Message.StartsWith("Live usage bars", StringComparison.Ordinal)) { }
+        try { Preferences.Validate(layout with { Sections = [Preferences.Initial.Sections.Single(section => section.Kind == SectionKind.Cpu) with { FanWidget = true }] }); throw new InvalidDataException("Animated fan was accepted on a CPU item."); }
+        catch (InvalidDataException error) when (error.Message.StartsWith("Animated fans", StringComparison.Ordinal)) { }
+    }
+    private static void CheckThemeWidgetsEditor(MainWindow window, string outputDirectory)
+    {
+        TabControl inspector = (TabControl)window.FindName("StudioInspectorTabs");
+        ComboBox sections = (ComboBox)window.FindName("SectionSelector");
+        sections.SelectedItem = sections.Items.Cast<SectionStyle>().First(item => item.Kind == SectionKind.Gpu);
+        foreach ((string tabId, string controlId) in new[]
+        {
+            ("StudioItemTab", "SectionName"), ("StudioMetricsTab", "AddMetricSelector"),
+            ("StudioVisualTab", "AnimatedFan"), ("StudioCanvasTab", "OverlaySize"), ("StudioLayoutsTab", "PresetSelector")
+        })
+        {
+            inspector.SelectedItem = inspector.Items.Cast<TabItem>().Single(item => AutomationProperties.GetAutomationId(item) == tabId);
+            window.UpdateLayout();
+            Require(Descendants(window).OfType<FrameworkElement>().Any(item => item.IsVisible && (item.Name == controlId || AutomationProperties.GetAutomationId(item) == controlId)), "An Overlay Studio settings tab hid its controls: " + tabId);
+        }
+        inspector.SelectedItem = inspector.Items.Cast<TabItem>().Single(item => AutomationProperties.GetAutomationId(item) == "StudioVisualTab");
+        window.UpdateLayout();
+        CheckBox themeCard = Descendants(window).OfType<CheckBox>().Single(item => AutomationProperties.GetAutomationId(item) == "ThemeCard");
+        CheckBox usageGauge = Descendants(window).OfType<CheckBox>().Single(item => AutomationProperties.GetAutomationId(item) == "LiveUsageGauge");
+        themeCard.IsChecked = true; themeCard.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
+        usageGauge.IsChecked = true; usageGauge.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
+        CheckBox toggle = Descendants(window).OfType<CheckBox>().Single(item => AutomationProperties.GetAutomationId(item) == "LiveUsageBar");
+        Slider width = Descendants(window).OfType<Slider>().Single(item => AutomationProperties.GetAutomationId(item) == "LiveUsageBarWidth");
+        Require(toggle.Visibility == Visibility.Visible, "The live bar control did not appear for the GPU item.");
+        toggle.IsChecked = true; toggle.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
+        width.Value = 300;
+        OverlayCanvas canvas = (OverlayCanvas)((ScrollViewer)window.FindName("PreviewViewport")).Content;
+        Border themedPanel = canvas.Children.OfType<Border>().Single(item => (string)item.Tag == ((SectionStyle)sections.SelectedItem).Key);
+        Require(themedPanel.CornerRadius.TopLeft == 12 && Descendants(themedPanel).OfType<Grid>().Any(item => AutomationProperties.GetAutomationId(item) == "UsageGauge_" + ((SectionStyle)sections.SelectedItem).Key), "The themed card and live gauge did not appear in Studio.");
+        Border track = Descendants(canvas).OfType<Border>().Single(item => (string?)item.Tag == "UsageBar:" + ((SectionStyle)sections.SelectedItem).Key);
+        Require(track.Width == 300 && track.Visibility == Visibility.Visible, "The width control did not update the visible Studio bar.");
+        width.Value = 500;
+        Require(themedPanel.Width >= 534, "A wide live bar extends beyond its graphical card.");
+        width.Value = 300;
+        CheckBox fanToggle = Descendants(window).OfType<CheckBox>().Single(item => AutomationProperties.GetAutomationId(item) == "AnimatedFan");
+        Slider fanSize = Descendants(window).OfType<Slider>().Single(item => AutomationProperties.GetAutomationId(item) == "AnimatedFanSize");
+        Require(fanSize.Template.FindName("PART_Track", fanSize) is Track { Thumb: not null }, "The themed slider cannot be dragged.");
+        TextBlock fanState = Descendants(window).OfType<TextBlock>().Single(item => AutomationProperties.GetAutomationId(item) == "FanStatus");
+        Require(fanState.Text.Contains("RPM", StringComparison.Ordinal) || fanState.Text.Contains("unavailable", StringComparison.Ordinal), "The fan control does not explain why its animation is stopped.");
+        fanToggle.IsChecked = true; fanToggle.RaiseEvent(new RoutedEventArgs(CheckBox.ClickEvent));
+        fanSize.Value = 50;
+        string key = ((SectionStyle)sections.SelectedItem).Key;
+        StackPanel widget = Descendants(canvas).OfType<StackPanel>().Single(item => AutomationProperties.GetAutomationId(item) == "FanWidget_" + key);
+        Canvas blades = Descendants(widget).OfType<Canvas>().Single(item => AutomationProperties.GetAutomationId(item) == "FanBlades_" + key);
+        Require(widget.Children.OfType<Viewbox>().Single().Width == 50, "The fan size control did not update the Studio widget.");
+        ImmutableArray<SensorReading> running = [new("Test GPU", "GpuAmd", "GPU Core", "Load", 65, "%"), new("Test GPU", "GpuAmd", "GPU Fan", "Fan", 1200, "RPM")];
+        canvas.UpdateData(OverlayData.Build(running, FrameMetrics.Summarize([], 0)));
+        Grid gauge = Descendants(themedPanel).OfType<Grid>().Single(item => AutomationProperties.GetAutomationId(item) == "UsageGauge_" + key);
+        Require(VisualText(gauge).Contains("65%") && gauge.Children.OfType<System.Windows.Shapes.Path>().Single().Data != Geometry.Empty, "The gauge did not follow the GPU load reading.");
+        Require(VisualText(widget).Contains("FAN  1200 RPM") && ((RotateTransform)blades.RenderTransform).HasAnimatedProperties, "The GPU fan did not animate from its reported speed.");
+        window.UpdateLayout();
+        SaveImage(window, Path.Combine(outputDirectory, "live-fan-in-studio.png"));
+        canvas.UpdateData(OverlayData.Build([running[0], running[1] with { Value = 0 }], FrameMetrics.Summarize([], 0)));
+        Require(!((RotateTransform)blades.RenderTransform).HasAnimatedProperties, "The GPU fan kept moving at zero RPM.");
     }
     private static void CheckTableLabelStability()
     {
@@ -662,7 +1074,7 @@ public static class SmokeTest
             Require(VisualText(liveOverlay.Surface).Contains(liveLabel), "Label edits did not reach the live overlay before saving.");
             Require(((TextBlock)window.FindName("UnsavedLayoutNotice")).Visibility == Visibility.Visible, "Live edits did not mark the layout as unsaved.");
             ComboBox preset = (ComboBox)window.FindName("PresetSelector");
-            preset.SelectedItem = "Classic RTSS";
+            preset.SelectedItem = preset.Items.Cast<LayoutPresets.Choice>().Single(item => item.Name == "Classic RTSS");
             Task discard = RespondToLayoutPromptAsync("6");
             FindButton(window, "ApplyPresetButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await discard;

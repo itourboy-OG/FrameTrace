@@ -3,7 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 /// <summary>Reclaims only Frame Trace trace sessions whose owning dashboard process has exited.</summary>
 internal static class CaptureSessions

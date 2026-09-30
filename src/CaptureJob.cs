@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 /// <summary>Windows owns capture-child cleanup even when the dashboard crashes or is terminated.</summary>
 internal sealed class CaptureJob : IDisposable

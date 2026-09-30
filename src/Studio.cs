@@ -3,10 +3,11 @@ using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 public partial class MainWindow
 {
@@ -16,6 +17,22 @@ public partial class MainWindow
     private double zoom = 1;
     private Point? panStart;
     private Point panOffsets;
+    private MouseButton? panButton;
+    private bool panMoved;
+    private string? contextSectionKey;
+    private readonly List<Preferences> layoutHistory = [];
+    private Preferences? observedLayout;
+    private Preferences? gestureStart;
+    private bool restoringLayout;
+    private readonly CheckBox themeCardToggle = new() { Content = "Graphical card layout" };
+    private readonly CheckBox usageGaugeToggle = new() { Content = "Live usage gauge" };
+    private readonly StackPanel usageBarOptions = new() { Margin = new Thickness(0, 14, 0, 0) };
+    private readonly CheckBox usageBarToggle = new() { Content = "Live usage bar" };
+    private readonly Slider usageBarWidth = new() { Minimum = 80, Maximum = 500, Value = 220, TickFrequency = 10, IsSnapToTickEnabled = true };
+    private readonly StackPanel fanOptions = new() { Margin = new Thickness(0, 12, 0, 0) };
+    private readonly CheckBox fanToggle = new() { Content = "Animated GPU fan · follows fan speed" };
+    private readonly TextBlock fanStatus = new() { Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 2, 0, 5), TextWrapping = TextWrapping.Wrap };
+    private readonly Slider fanSize = new() { Minimum = 24, Maximum = 80, Value = 36, TickFrequency = 2, IsSnapToTickEnabled = true };
     private SectionStyle Selected => draft.Sections.Single(s => s.Key == ((SectionStyle)SectionSelector.SelectedItem).Key);
 
     private void InitializeStudio()
@@ -24,7 +41,7 @@ public partial class MainWindow
         DisplaySelector.ItemsSource = displays;
         Rect? current = Desktop.Foreground()?.Monitor;
         DisplaySelector.SelectedItem = displays.FirstOrDefault(d => d.Bounds == current) ?? displays.Single(d => d.Primary);
-        PresetSelector.ItemsSource = LayoutPresets.Names; PresetSelector.SelectedIndex = 0;
+        PresetSelector.ItemsSource = LayoutPresets.Choices; PresetSelector.SelectedIndex = 0;
 #if PREVIEW_BUILD
         string stableDirectory = Directory.Exists(AppIdentity.StableDataDirectory) ? AppIdentity.StableDataDirectory : AppIdentity.LegacyDataDirectory;
         string stableLayoutsPath = Path.Combine(stableDirectory, "saved-layouts.json");
@@ -34,6 +51,32 @@ public partial class MainWindow
 #endif
         AddMetricSelector.ItemsSource = OverlayData.Build(readings, summary).SelectMany(section => section.Metrics.Where(metric => metric.Id != "upscaler").Select(metric => new MetricChoice(section.Kind, metric.Id, section.Kind + " · " + metric.Label))).ToArray();
         AddMetricSelector.SelectedIndex = 0;
+        AutomationProperties.SetAutomationId(themeCardToggle, "ThemeCard");
+        AutomationProperties.SetAutomationId(usageGaugeToggle, "LiveUsageGauge");
+        AutomationProperties.SetAutomationId(usageBarToggle, "LiveUsageBar");
+        AutomationProperties.SetAutomationId(usageBarWidth, "LiveUsageBarWidth");
+        usageBarOptions.Children.Add(usageBarToggle);
+        usageBarOptions.Children.Add(new TextBlock { Text = "Bar width", Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 8, 0, 4) });
+        usageBarOptions.Children.Add(usageBarWidth);
+        AutomationProperties.SetAutomationId(fanToggle, "AnimatedFan");
+        AutomationProperties.SetAutomationId(fanStatus, "FanStatus");
+        AutomationProperties.SetAutomationId(fanSize, "AnimatedFanSize");
+        fanOptions.Children.Add(fanToggle);
+        fanOptions.Children.Add(fanStatus);
+        fanOptions.Children.Add(new TextBlock { Text = "Fan icon size", Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 8, 0, 4) });
+        fanOptions.Children.Add(fanSize);
+        WidgetOptions.Children.Add(themeCardToggle);
+        WidgetOptions.Children.Add(new TextBlock { Text = "A full panel with a hardware header. GPU and CPU show a live load trace; FPS uses the frame-time graph when enabled.", Foreground = Brushes.LightSlateGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 12) });
+        WidgetOptions.Children.Add(fanOptions);
+        WidgetOptions.Children.Add(usageBarOptions);
+        WidgetOptions.Children.Add(usageGaugeToggle);
+        themeCardToggle.Click += EditSection;
+        usageGaugeToggle.Click += EditSection;
+        usageBarToggle.Click += EditSection;
+        usageBarWidth.ValueChanged += EditSection;
+        fanToggle.Click += EditSection;
+        fanSize.ValueChanged += EditSection;
+        InitializeArtworkTools();
     }
     private void RefreshDisplays()
     {
@@ -54,7 +97,7 @@ public partial class MainWindow
     {
         if (!ready || DisplaySelector.SelectedItem is not DisplayInfo display) return;
         preview.Width = display.CanvasSize.Width; preview.Height = display.CanvasSize.Height;
-        CanvasDescription.Text = $"{display.Bounds.Width:0} × {display.Bounds.Height:0} · Windows scale {display.Scale:P0}. Ctrl + wheel to zoom; middle-drag to pan. Positions match this display.";
+        CanvasDescription.Text = $"{display.Bounds.Width:0} × {display.Bounds.Height:0} · Windows scale {display.Scale:P0}. Ctrl + wheel to zoom; right-drag to pan. Positions match this display.";
         FitPreview(); RefreshTestOverlay();
     }
     private void SetZoom(double value)
@@ -71,6 +114,16 @@ public partial class MainWindow
         PreviewViewport.ScrollToHorizontalOffset(0); PreviewViewport.ScrollToVerticalOffset(0);
     }
     private void FitStudio(object sender, RoutedEventArgs e) => FitPreview();
+    private void FitItems(object sender, RoutedEventArgs e)
+    {
+        Rect bounds = preview.VisibleBounds();
+        if (bounds.IsEmpty) return;
+        fitStudio = false;
+        SetZoom(Math.Min(1.25, Math.Min((PreviewViewport.ActualWidth - 24) / bounds.Width, (PreviewViewport.ActualHeight - 24) / bounds.Height)));
+        PreviewViewport.UpdateLayout();
+        PreviewViewport.ScrollToHorizontalOffset(Math.Max(0, bounds.X * zoom - 12));
+        PreviewViewport.ScrollToVerticalOffset(Math.Max(0, bounds.Y * zoom - 12));
+    }
     private void ActualStudio(object sender, RoutedEventArgs e) { fitStudio = false; SetZoom(1); }
     private void ChangeZoom(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
@@ -91,25 +144,87 @@ public partial class MainWindow
     }
     private void StartPan(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Middle) return;
+        if (e.ChangedButton is not (MouseButton.Middle or MouseButton.Right)) return;
+        if (e.OriginalSource is not DependencyObject source || !preview.ContainsSource(source)) return;
+        panButton = e.ChangedButton;
+        contextSectionKey = preview.SectionAt(source);
+        panMoved = false;
         panStart = e.GetPosition(PreviewViewport); panOffsets = new Point(PreviewViewport.HorizontalOffset, PreviewViewport.VerticalOffset);
         PreviewViewport.CaptureMouse(); e.Handled = true;
     }
     private void PanStudio(object sender, MouseEventArgs e)
     {
-        if (panStart is not Point start || e.MiddleButton != MouseButtonState.Pressed) return;
+        if (panStart is not Point start || panButton is not MouseButton button || (button == MouseButton.Middle ? e.MiddleButton : e.RightButton) != MouseButtonState.Pressed) return;
         Point now = e.GetPosition(PreviewViewport);
+        if (!panMoved && Math.Abs(now.X - start.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(now.Y - start.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        panMoved = true;
         PreviewViewport.ScrollToHorizontalOffset(panOffsets.X + start.X - now.X);
         PreviewViewport.ScrollToVerticalOffset(panOffsets.Y + start.Y - now.Y); e.Handled = true;
     }
     private void EndPan(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Middle) return;
-        panStart = null; PreviewViewport.ReleaseMouseCapture(); e.Handled = true;
+        if (e.ChangedButton != panButton) return;
+        bool showMenu = panButton == MouseButton.Right && !panMoved;
+        string? key = contextSectionKey;
+        panStart = null; panButton = null; PreviewViewport.ReleaseMouseCapture(); e.Handled = true;
+        if (showMenu) { ContextMenu menu = CreateCanvasMenu(key); menu.IsOpen = true; }
+    }
+    internal ContextMenu CreateCanvasMenu(string? key)
+    {
+        ContextMenu menu = new() { PlacementTarget = PreviewViewport, Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint };
+        if (key is not null)
+        {
+            preview.SelectItem(key);
+            MenuItem edit = new() { Header = "Edit item" };
+            AutomationProperties.SetAutomationId(edit, "CanvasEditItem");
+            edit.Click += (_, _) => StudioInspectorTabs.SelectedIndex = 0;
+            menu.Items.Add(edit);
+            if (Selected.Kind == SectionKind.Artwork)
+            {
+                MenuItem resize = new() { Header = "Resize artwork" };
+                AutomationProperties.SetAutomationId(resize, "CanvasResizeArtwork");
+                resize.Click += (_, _) => { StudioArtworkTab.IsSelected = true; artworkWidth.Focus(); };
+                menu.Items.Add(resize);
+            }
+            MenuItem forward = new() { Header = "Bring forward", IsEnabled = draft.Sections.IndexOf(Selected) < draft.Sections.Length - 1 };
+            AutomationProperties.SetAutomationId(forward, "CanvasBringForward");
+            forward.Click += (_, _) => MoveLayer(1);
+            menu.Items.Add(forward);
+            MenuItem backward = new() { Header = "Send backward", IsEnabled = draft.Sections.IndexOf(Selected) > 0 };
+            AutomationProperties.SetAutomationId(backward, "CanvasSendBackward");
+            backward.Click += (_, _) => MoveLayer(-1);
+            menu.Items.Add(backward);
+            MenuItem duplicate = new() { Header = "Duplicate item", IsEnabled = draft.Sections.Length < 64 };
+            AutomationProperties.SetAutomationId(duplicate, "CanvasDuplicateItem");
+            duplicate.Click += (_, _) => DuplicateOverlayItem();
+            menu.Items.Add(duplicate);
+            menu.Items.Add(new Separator());
+            MenuItem remove = new() { Header = "Remove item" };
+            AutomationProperties.SetAutomationId(remove, "CanvasRemoveItem");
+            remove.Click += (_, _) => RemoveOverlayItem(remove, new RoutedEventArgs());
+            menu.Items.Add(remove);
+        }
+        else
+        {
+            MenuItem zoomIn = new() { Header = "Zoom in" };
+            AutomationProperties.SetAutomationId(zoomIn, "CanvasZoomIn");
+            zoomIn.Click += (_, _) => { fitStudio = false; SetZoom(zoom * 1.2); };
+            menu.Items.Add(zoomIn);
+            MenuItem zoomOut = new() { Header = "Zoom out" };
+            AutomationProperties.SetAutomationId(zoomOut, "CanvasZoomOut");
+            zoomOut.Click += (_, _) => { fitStudio = false; SetZoom(zoom / 1.2); };
+            menu.Items.Add(zoomOut);
+            MenuItem fit = new() { Header = "Fit canvas" };
+            AutomationProperties.SetAutomationId(fit, "CanvasFit");
+            fit.Click += FitStudio;
+            menu.Items.Add(fit);
+        }
+        return menu;
     }
     private void ApplyPreset(object sender, RoutedEventArgs e)
     {
-        if (PresetSelector.SelectedItem is not string name) return;
+        if (PresetSelector.SelectedItem is not LayoutPresets.Choice choice) return;
+        string name = choice.Name;
         if (!ConfirmLayoutReplacement($"load ‘{name}’")) return;
         draft = LayoutPresets.Create(draft, name); preview.Apply(draft); RefreshTestOverlay();
         preview.UpdateData(OverlayData.Build(readings, summary));
@@ -126,7 +241,72 @@ public partial class MainWindow
         RefreshLayoutNotice();
     }
 
-    private void RefreshLayoutNotice() => UnsavedLayoutNotice.Visibility = Preferences.HasLayoutChanges(draft, layoutBaseline) ? Visibility.Visible : Visibility.Collapsed;
+    private void RefreshLayoutNotice()
+    {
+        if (gestureStart is not null)
+        {
+            if (observedLayout is not null && LayoutReferenceChanged(draft, observedLayout))
+            {
+                observedLayout = draft;
+                UnsavedLayoutNotice.Visibility = Visibility.Visible;
+            }
+            UndoStudioButton.IsEnabled = false;
+            return;
+        }
+        if (observedLayout is not null && Preferences.HasLayoutChanges(draft, observedLayout))
+        {
+            if (!restoringLayout)
+            {
+                layoutHistory.Add(observedLayout);
+                if (layoutHistory.Count > 40) layoutHistory.RemoveAt(0);
+            }
+            observedLayout = draft;
+        }
+        observedLayout ??= draft;
+        UndoStudioButton.IsEnabled = layoutHistory.Count > 0;
+        UnsavedLayoutNotice.Visibility = Preferences.HasLayoutChanges(draft, layoutBaseline) ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private static bool LayoutReferenceChanged(Preferences current, Preferences previous) =>
+        current.Accent != previous.Accent || current.Opacity != previous.Opacity || current.Font != previous.Font
+        || current.OverlayScale != previous.OverlayScale || current.HideUnknownTechnology != previous.HideUnknownTechnology
+        || !current.Sections.Equals(previous.Sections);
+
+    private void BeginLayoutGesture() { gestureStart ??= draft; UndoStudioButton.IsEnabled = false; }
+
+    private void EndLayoutGesture()
+    {
+        if (gestureStart is null) return;
+        if (Preferences.HasLayoutChanges(draft, gestureStart))
+        {
+            layoutHistory.Add(gestureStart);
+            if (layoutHistory.Count > 40) layoutHistory.RemoveAt(0);
+        }
+        gestureStart = null;
+        RefreshLayoutNotice();
+    }
+
+    private void UndoStudioShortcut(object sender, KeyEventArgs e)
+    {
+        if (Pages.SelectedIndex != 1 || e.Key != Key.C || Keyboard.Modifiers != ModifierKeys.Control || Keyboard.FocusedElement is TextBoxBase) return;
+        UndoStudio(sender, new RoutedEventArgs());
+        e.Handled = true;
+    }
+
+    private void UndoStudio(object sender, RoutedEventArgs e)
+    {
+        if (gestureStart is not null || layoutHistory.Count == 0) return;
+        Preferences previous = layoutHistory[^1];
+        layoutHistory.RemoveAt(layoutHistory.Count - 1);
+        restoringLayout = true;
+        try
+        {
+            draft = Preferences.ApplyImportedLayout(draft, previous);
+            LoadControls();
+            StudioStatus.Text = "Last overlay edit undone. Save & apply to use this layout in your game.";
+        }
+        finally { restoringLayout = false; }
+    }
     private void LoadControls()
     {
         RefreshSectionSelector();
@@ -145,20 +325,55 @@ public partial class MainWindow
     }
     private void LoadSection()
     {
-        loading = true; SectionStyle section = Selected;
+        loading = true;
+        bool empty = draft.Sections.IsEmpty;
+        ((TabItem)StudioInspectorTabs.Items[0]).IsEnabled = !empty;
+        ((TabItem)StudioInspectorTabs.Items[3]).IsEnabled = !empty;
+        SectionSelector.IsEnabled = !empty;
+        RemoveOverlayItemButton.IsEnabled = !empty;
+        if (empty)
+        {
+            MetricOptions.Children.Clear(); metricChecks.Clear();
+            StudioArtworkTab.IsSelected = true;
+            loading = false;
+            return;
+        }
+        SectionStyle section = Selected;
         SectionName.Text = section.Name; SectionVisible.IsChecked = section.Visible; NameSize.Value = section.NameSize; ValueSize.Value = section.ValueSize;
         IndependentLabelSize.IsChecked = section.LabelSize > 0; LabelSize.Value = section.LabelSize > 0 ? section.LabelSize : section.ValueSize;
         ShowSectionName.IsChecked = section.ShowName; HorizontalSection.IsChecked = section.Horizontal;
         GraphOptions.Visibility = section.Kind == SectionKind.Frames ? Visibility.Visible : Visibility.Collapsed;
         MetricLayoutSelector.SelectedIndex = (int)section.Layout; SectionPadding.Value = section.Padding;
         HeroSize.Value = section.HeroSize; GraphBelow.IsChecked = section.GraphBelow; TextShadow.IsChecked = section.TextShadow;
+        artworkOptions.Visibility = section.Kind == SectionKind.Artwork && (section.ImageData.Length > 0 || !section.AnimationFrames.IsEmpty || section.ArtworkFill || section.BarSource != ArtworkBarSource.None) ? Visibility.Visible : Visibility.Collapsed;
+        artworkWidth.Value = section.ImageWidth;
+        artworkHeight.Value = section.ImageHeight;
+        artworkOpacity.Value = section.ArtworkOpacity;
+        artworkRadius.Value = section.ArtworkRadius;
+        radiusOptions.Visibility = section.ArtworkFill ? Visibility.Visible : Visibility.Collapsed;
+        animationOptions.Visibility = section.AnimationFrames.IsEmpty ? Visibility.Collapsed : Visibility.Visible;
+        animationPlayback.SelectedIndex = (int)section.AnimationSource;
+        alarmThresholdOptions.Visibility = section.AnimationSource is ArtworkAnimationSource.GpuTemperatureAlarm or ArtworkAnimationSource.CpuTemperatureAlarm ? Visibility.Visible : Visibility.Collapsed;
+        alarmThreshold.Value = Math.Clamp(section.AnimationMaximum, alarmThreshold.Minimum, alarmThreshold.Maximum);
+        NameColor.Content = section.BarSource != ArtworkBarSource.None ? "Bar color" : section.ArtworkFill ? "Fill color" : "Name color";
+        themeCardToggle.Visibility = section.Kind == SectionKind.Artwork ? Visibility.Collapsed : Visibility.Visible;
+        themeCardToggle.IsChecked = section.ThemeCard;
+        usageGaugeToggle.Visibility = section.Kind is SectionKind.Gpu or SectionKind.Cpu ? Visibility.Visible : Visibility.Collapsed;
+        usageGaugeToggle.IsChecked = section.UsageGauge;
+        usageBarOptions.Visibility = section.Kind is SectionKind.Gpu or SectionKind.Cpu ? Visibility.Visible : Visibility.Collapsed;
+        usageBarToggle.IsChecked = section.UsageBar; usageBarWidth.Value = section.UsageBarWidth;
+        fanOptions.Visibility = section.Kind == SectionKind.Gpu ? Visibility.Visible : Visibility.Collapsed;
+        fanToggle.IsChecked = section.FanWidget; fanSize.Value = section.FanSize;
+        UpdateFanStatus();
         ShowGraph.IsChecked = section.Graph; GraphWidth.Value = section.GraphWidth; GraphHeight.Value = section.GraphHeight;
         NameColor.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(section.NameColor)); NameColor.BorderThickness = new Thickness(3);
         ValueColor.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(section.ValueColor)); ValueColor.BorderThickness = new Thickness(3);
         MetricOptions.Children.Clear(); metricChecks.Clear();
         if (section.Kind == SectionKind.Frames)
             MetricOptions.Children.Add(new TextBlock { Text = "Upscaler detection is not available. FG identification supports tagged AFMF / XeSS-FG only; unknown does not mean disabled.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 0, 0, 8) });
-        ImmutableArray<MetricValue> available = OverlayData.Build(readings, summary).Single(d => d.Kind == section.Kind).Metrics;
+        if (section.Kind == SectionKind.Game)
+            MetricOptions.Children.Add(new TextBlock { Text = "D3D9 is identified separately. DXGI is the presentation API shared by newer Direct3D versions; the exact version is not available from capture.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 0, 0, 8) });
+        ImmutableArray<MetricValue> available = OverlayData.Build(readings, summary).FirstOrDefault(d => d.Kind == section.Kind)?.Metrics ?? [];
         foreach (string id in section.Metrics.Concat(Preferences.AvailableMetrics(section.Kind).Except(section.Metrics)))
         {
             MetricValue metric = available.Single(m => m.Id == id);
@@ -182,6 +397,17 @@ public partial class MainWindow
         }
         loading = false;
     }
+    private void UpdateFanStatus()
+    {
+        double? rpm = Readings.Find(readings, "Gpu", "Fan", "GPU Fan")?.Value;
+        fanStatus.Text = rpm switch
+        {
+            null => "Fan speed sensor unavailable. The icon stays still.",
+            <= 0 => "Current fan: 0 RPM. Zero RPM mode is normal at idle; the icon moves when the fan starts.",
+            _ => $"Current fan: {rpm:0} RPM. The icon follows the reported speed."
+        };
+        fanStatus.Foreground = rpm is > 0 ? new SolidColorBrush(Color.FromRgb(131, 239, 205)) : Brushes.LightSlateGray;
+    }
     private void MoveMetric(string id, int index)
     {
         ImmutableArray<string> moved = Selected.Metrics.Remove(id).Insert(index, id);
@@ -190,10 +416,21 @@ public partial class MainWindow
     private void SelectSection(object sender, SelectionChangedEventArgs e) { if (ready && !loading && SectionSelector.SelectedItem is SectionStyle) LoadSection(); }
     private void EditSection(object sender, RoutedEventArgs e)
     {
-        if (!ready || loading) return;
+        if (!ready || loading || draft.Sections.IsEmpty) return;
         ImmutableArray<string> metrics = Selected.Metrics.Concat(Preferences.AvailableMetrics(Selected.Kind).Except(Selected.Metrics)).Where(id => metricChecks[id].IsChecked == true).ToImmutableArray();
-        UpdateSection(Selected with { Name = SectionName.Text, Visible = SectionVisible.IsChecked == true, NameSize = NameSize.Value, ValueSize = ValueSize.Value, Metrics = metrics, ShowName = ShowSectionName.IsChecked == true, Horizontal = HorizontalSection.IsChecked == true, Graph = ShowGraph.IsChecked == true, GraphWidth = GraphWidth.Value, GraphHeight = GraphHeight.Value, Layout = (MetricLayout)MetricLayoutSelector.SelectedIndex, Padding = SectionPadding.Value, HeroSize = HeroSize.Value, GraphBelow = GraphBelow.IsChecked == true, TextShadow = TextShadow.IsChecked == true, LabelSize = IndependentLabelSize.IsChecked == true ? LabelSize.Value : 0 });
-        if (sender is CheckBox check && check.Tag is string) LoadSection();
+        SectionStyle edited = Selected with { Name = SectionName.Text, Visible = SectionVisible.IsChecked == true, NameSize = NameSize.Value, ValueSize = ValueSize.Value, Metrics = metrics, ShowName = ShowSectionName.IsChecked == true, Horizontal = HorizontalSection.IsChecked == true, Graph = ShowGraph.IsChecked == true, GraphWidth = GraphWidth.Value, GraphHeight = GraphHeight.Value, Layout = (MetricLayout)MetricLayoutSelector.SelectedIndex, Padding = SectionPadding.Value, HeroSize = HeroSize.Value, GraphBelow = GraphBelow.IsChecked == true, TextShadow = TextShadow.IsChecked == true, LabelSize = IndependentLabelSize.IsChecked == true ? LabelSize.Value : 0 };
+        edited = edited with { ThemeCard = themeCardToggle.IsChecked == true, UsageGauge = usageGaugeToggle.IsChecked == true, UsageBar = usageBarToggle.IsChecked == true, UsageBarWidth = usageBarWidth.Value, FanWidget = fanToggle.IsChecked == true, FanSize = fanSize.Value, ImageWidth = artworkWidth.Value, ImageHeight = artworkHeight.Value, ArtworkOpacity = artworkOpacity.Value, ArtworkRadius = artworkRadius.Value, AnimationSource = Selected.AnimationFrames.IsEmpty ? Selected.AnimationSource : (ArtworkAnimationSource)animationPlayback.SelectedIndex };
+        if (edited.AnimationSource is ArtworkAnimationSource.GpuTemperatureAlarm or ArtworkAnimationSource.CpuTemperatureAlarm)
+            edited = edited with { AnimationMinimum = alarmThreshold.Value - 1, AnimationMaximum = alarmThreshold.Value };
+        if (sender == alarmThreshold)
+        {
+            string sensor = edited.AnimationSource == ArtworkAnimationSource.CpuTemperatureAlarm ? "CPU" : "GPU";
+            string oldName = $"{sensor} temperature alarm · {Selected.AnimationMaximum:0}°C";
+            edited = edited with { AlarmThresholdCustomized = true, Name = Selected.Name == oldName ? $"{sensor} temperature alarm · {alarmThreshold.Value:0}°C" : edited.Name };
+        }
+        UpdateSection(edited);
+        if (sender is CheckBox { Tag: string }) LoadSection();
+        if (sender == animationPlayback || sender == alarmThreshold) LoadSection();
     }
     private void UpdateSection(SectionStyle section)
     {

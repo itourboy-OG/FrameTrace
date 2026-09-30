@@ -7,8 +7,11 @@ using System.Text;
 using Microsoft.Win32.SafeHandles;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media.Imaging;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 public sealed record CaptureTarget(int ProcessId, DateTime Started, string Application, string Title)
 {
@@ -16,8 +19,40 @@ public sealed record CaptureTarget(int ProcessId, DateTime Started, string Appli
     public static CaptureTarget Automatic => new(0, DateTime.MinValue, "", "");
 }
 
+internal static class CaptureRules
+{
+    public static ImmutableArray<string> Allow(ImmutableArray<string> ignored, string application) =>
+        ignored.Where(name => !name.Equals(application, StringComparison.OrdinalIgnoreCase)).ToImmutableArray();
+
+    public static ImmutableArray<string> Ignore(ImmutableArray<string> ignored, string application) =>
+        ignored.Contains(application, StringComparer.OrdinalIgnoreCase) ? ignored : ignored.Add(application);
+}
+
 internal static class RunningApplications
 {
+    public static BitmapSource Icon(int pid)
+    {
+        string path = ExecutablePath(pid);
+        uint count = ExtractIconEx(path, 0, out nint large, out nint small, 1);
+        try
+        {
+            if (count == 0 || small == 0) throw new InvalidDataException($"No application icon was found in {path}.");
+            BitmapSource icon = Imaging.CreateBitmapSourceFromHIcon(small, Int32Rect.Empty, BitmapSizeOptions.FromWidthAndHeight(24, 24));
+            icon.Freeze();
+            return icon;
+        }
+        finally
+        {
+            if (small != 0) DestroyIcon(small);
+            if (large != 0) DestroyIcon(large);
+        }
+    }
+
+    [DllImport("shell32.dll", EntryPoint = "ExtractIconExW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint ExtractIconEx(string file, int index, out nint large, out nint small, uint icons);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyIcon(nint icon);
     private static string ExecutablePath(int pid)
     {
         using SafeProcessHandle handle = OpenProcess(0x1000, false, pid);
@@ -63,7 +98,15 @@ public partial class MainWindow
     private CaptureTarget selectedTarget = CaptureTarget.Automatic;
     private bool refreshingTargets;
 
-    private void OpenCaptureTargets(object sender, EventArgs e) => RefreshCaptureTargets();
+    private void OpenCaptureTargetsBeforeMouse(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton == MouseButton.Left && !CaptureTargetSelector.IsDropDownOpen) RefreshCaptureTargets();
+    }
+
+    private void OpenCaptureTargetsBeforeKey(object sender, KeyEventArgs e)
+    {
+        if (!CaptureTargetSelector.IsDropDownOpen && (e.Key == Key.F4 || e.Key == Key.Down && (Keyboard.Modifiers & ModifierKeys.Alt) != 0)) RefreshCaptureTargets();
+    }
 
     internal void RefreshCaptureTargets()
     {
@@ -79,6 +122,7 @@ public partial class MainWindow
         }
         catch (Exception error) { Report("Could not refresh running applications", error); }
         finally { refreshingTargets = false; }
+        RefreshCaptureRuleButtons();
     }
 
     private void ChangeCaptureTarget(object sender, SelectionChangedEventArgs e)
@@ -96,6 +140,7 @@ public partial class MainWindow
             manualProcess?.Dispose(); manualProcess = next; next = null; selectedTarget = choice;
             target = 0; summary = FrameMetrics.Summarize([], Environment.TickCount64); overlay?.Hide();
             Diagnostics.Write("capture-selection", System.Text.Json.JsonSerializer.Serialize(choice));
+            RefreshCaptureRuleButtons();
         }
         catch (Exception error)
         {
@@ -103,5 +148,54 @@ public partial class MainWindow
             RefreshCaptureTargets();
         }
         finally { next?.Dispose(); }
+    }
+
+    private void RefreshCaptureRuleButtons()
+    {
+        CaptureTarget? choice = CaptureTargetSelector.SelectedItem as CaptureTarget;
+        bool selected = choice is { ProcessId: not 0 };
+        bool ignored = selected && preferences.IgnoredApps.Contains(choice!.Application, StringComparer.OrdinalIgnoreCase);
+        AllowCaptureButton.IsEnabled = ignored;
+        IgnoreCaptureButton.IsEnabled = selected && !ignored;
+        CaptureRuleStatus.Text = !selected ? "Select a running app to allow or ignore it in automatic capture."
+            : ignored ? $"{choice!.Application} is excluded from automatic capture."
+            : $"{choice!.Application} is allowed in automatic capture.";
+    }
+
+    private void AllowCaptureTarget(object sender, RoutedEventArgs e)
+    {
+        if (CaptureTargetSelector.SelectedItem is not CaptureTarget { ProcessId: not 0 } choice) return;
+        try
+        {
+            SaveCaptureRules(CaptureRules.Allow(ReadIgnoredApps(), choice.Application));
+            CaptureRuleStatus.Text = $"{choice.Application} is now allowed in automatic capture.";
+        }
+        catch (Exception error) { Report("Could not allow automatic capture", error); }
+    }
+
+    private void IgnoreCaptureTarget(object sender, RoutedEventArgs e)
+    {
+        if (CaptureTargetSelector.SelectedItem is not CaptureTarget { ProcessId: not 0 } choice) return;
+        try
+        {
+            SaveCaptureRules(CaptureRules.Ignore(ReadIgnoredApps(), choice.Application));
+            CaptureRuleStatus.Text = $"{choice.Application} is now excluded from automatic capture.";
+        }
+        catch (Exception error) { Report("Could not exclude this application", error); }
+    }
+
+    private ImmutableArray<string> ReadIgnoredApps() => IgnoredApps.Text
+        .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Distinct(StringComparer.OrdinalIgnoreCase).ToImmutableArray();
+
+    private void SaveCaptureRules(ImmutableArray<string> ignored)
+    {
+        Preferences updated = Preferences.Validate(preferences with { IgnoredApps = ignored });
+        Preferences.Save(updated);
+        preferences = updated;
+        draft = draft with { IgnoredApps = ignored };
+        IgnoredApps.Text = string.Join(Environment.NewLine, ignored);
+        CaptureTargetSelector.SelectedIndex = 0;
+        RefreshCaptureRuleButtons();
     }
 }

@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 public partial class MainWindow
 {

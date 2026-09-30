@@ -1,6 +1,6 @@
 using Microsoft.Win32;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 internal static class StartupRegistration
 {

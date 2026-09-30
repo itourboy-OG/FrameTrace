@@ -1,7 +1,7 @@
 using System.IO;
 using System.Windows;
 
-namespace Frameglass;
+namespace FrameTrace;
 
 public partial class App : Application
 {
@@ -48,6 +48,15 @@ public partial class App : Application
             Shutdown(Environment.ExitCode);
             return;
         }
+#if PREVIEW_BUILD
+        if (e.Args.Length == 3 && e.Args[0] == "--artwork-test")
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            await SmokeTest.RunArtworkAsync(e.Args[1], Path.GetFullPath(e.Args[2]));
+            Shutdown(Environment.ExitCode);
+            return;
+        }
+#endif
         if (e.Args.Length == 2 && e.Args[0] == "--smoke-test")
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
