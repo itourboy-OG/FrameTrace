@@ -331,22 +331,25 @@ public static class SmokeTest
             Preferences custom = Preferences.Initial with { Sections = Preferences.Initial.Sections.Select(section => section with { Labels = section.Kind == SectionKind.Frames ? section.Labels.SetItem("app", "My FPS") : section.Labels }).ToImmutableArray() };
             Preferences.Write(custom, Path.Combine(outputDirectory, "custom.json"));
             Require(Preferences.Parse(File.ReadAllText(Path.Combine(outputDirectory, "custom.json"))).Sections[0].Labels["app"] == "My FPS", "Custom labels did not survive saving.");
-            Preferences sensorRate = Preferences.Initial with { SensorRefreshMs = 2500 };
+            Preferences sensorRate = Preferences.Initial with { SensorRefreshMs = 2500, FpsRefreshMs = 50 };
             Preferences.Write(sensorRate, Path.Combine(outputDirectory, "sensor-refresh.json"));
-            Require(Preferences.Parse(File.ReadAllText(Path.Combine(outputDirectory, "sensor-refresh.json"))).SensorRefreshMs == 2500, "Sensor refresh preference did not survive saving.");
+            Preferences savedRate = Preferences.Parse(File.ReadAllText(Path.Combine(outputDirectory, "sensor-refresh.json")));
+            Require(savedRate.SensorRefreshMs == 2500 && savedRate.FpsRefreshMs == 50, "Display or sensor refresh preference did not survive saving.");
             Preferences startup = Preferences.Initial with { StartMinimized = true, RunAtLogin = true, ReduceMotion = true, CheckUpdatesOnStartup = false, InspectAmdUpscaler = true };
             Preferences.Write(startup, Path.Combine(outputDirectory, "settings.json"));
             Preferences restoredSettings = Preferences.Parse(File.ReadAllText(Path.Combine(outputDirectory, "settings.json")));
             Require(restoredSettings.StartMinimized && restoredSettings.RunAtLogin && restoredSettings.ReduceMotion && !restoredSettings.CheckUpdatesOnStartup && restoredSettings.InspectAmdUpscaler, "Startup, accessibility, or AMD inspection preferences did not survive saving.");
-            Preferences localSettings = Preferences.Initial with { Shortcut = new Hotkey(3, 0x4B), OverlayEnabled = false, IgnoredApps = ["notepad.exe"], SensorRefreshMs = 1500, StartMinimized = true, RunAtLogin = true, ReduceMotion = true, CheckUpdatesOnStartup = false };
+            Preferences localSettings = Preferences.Initial with { Shortcut = new Hotkey(3, 0x4B), OverlayEnabled = false, IgnoredApps = ["notepad.exe"], SensorRefreshMs = 1500, FpsRefreshMs = 200, StartMinimized = true, RunAtLogin = true, ReduceMotion = true, CheckUpdatesOnStartup = false };
             Preferences sharedLayout = Preferences.ForLayoutExport(localSettings);
             Require(!sharedLayout.StartMinimized && !sharedLayout.RunAtLogin && !sharedLayout.ReduceMotion && sharedLayout.CheckUpdatesOnStartup && sharedLayout.IgnoredApps.SequenceEqual(Preferences.Initial.IgnoredApps), "Layout export included local startup, accessibility, update, or ignore-list settings.");
             Preferences importedLayout = Preferences.ApplyImportedLayout(localSettings, Preferences.Initial with { Font = "Arial" });
-            Require(importedLayout.Font == "Arial" && importedLayout.Shortcut == localSettings.Shortcut && !importedLayout.OverlayEnabled && importedLayout.IgnoredApps.SequenceEqual(localSettings.IgnoredApps) && importedLayout.SensorRefreshMs == 1500 && importedLayout.StartMinimized && importedLayout.RunAtLogin && importedLayout.ReduceMotion && !importedLayout.CheckUpdatesOnStartup, "Importing a layout changed local app settings.");
+            Require(importedLayout.Font == "Arial" && importedLayout.Shortcut == localSettings.Shortcut && !importedLayout.OverlayEnabled && importedLayout.IgnoredApps.SequenceEqual(localSettings.IgnoredApps) && importedLayout.SensorRefreshMs == 1500 && importedLayout.FpsRefreshMs == 200 && importedLayout.StartMinimized && importedLayout.RunAtLogin && importedLayout.ReduceMotion && !importedLayout.CheckUpdatesOnStartup, "Importing a layout changed local app settings.");
             Require(!Preferences.HasLayoutChanges(localSettings, Preferences.Initial), "Local app settings incorrectly marked the overlay layout as edited.");
             Require(!Preferences.HasLayoutChanges(Preferences.Parse(JsonSerializer.Serialize(custom)), custom) && Preferences.HasLayoutChanges(custom, Preferences.Initial), "Layout edit detection missed customization or marked identical layouts as edited.");
             try { Preferences.Validate(Preferences.Initial with { SensorRefreshMs = 251 }); throw new InvalidDataException("Invalid sensor refresh interval was accepted."); }
             catch (InvalidDataException error) when (error.Message.StartsWith("Sensor refresh interval", StringComparison.Ordinal)) { }
+            try { Preferences.Validate(Preferences.Initial with { FpsRefreshMs = 75 }); throw new InvalidDataException("Invalid FPS display refresh interval was accepted."); }
+            catch (InvalidDataException error) when (error.Message.StartsWith("FPS display refresh interval", StringComparison.Ordinal)) { }
             foreach (string preset in LayoutPresets.Names)
             {
                 Preferences styled = Preferences.Validate(LayoutPresets.Create(Preferences.Initial, preset));

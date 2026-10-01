@@ -430,7 +430,7 @@ public partial class MainWindow : Window
 
             RenderData();
 
-            try { await Task.Delay(100, shutdown.Token); }
+            try { await Task.Delay(preferences.FpsRefreshMs, shutdown.Token); }
 
             catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { break; }
 
@@ -506,10 +506,13 @@ public partial class MainWindow : Window
 
     }
 
-    private Preferences CollectSettings() => Preferences.Validate(draft with { OverlayEnabled = OverlayStartup.IsChecked == true, StartMinimized = StartMinimizedInput.IsChecked == true, RunAtLogin = RunAtLoginInput.IsChecked == true, ReduceMotion = ReduceMotionInput.IsChecked == true, CheckUpdatesOnStartup = CheckUpdatesOnStartupInput.IsChecked == true, InspectAmdUpscaler = InspectAmdUpscalerInput.IsChecked == true, SensorRefreshMs = (int)SensorRefreshSlider.Value, IgnoredApps = IgnoredApps.Text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToImmutableArray() });
+    private Preferences CollectSettings() => Preferences.Validate(draft with { OverlayEnabled = OverlayStartup.IsChecked == true, StartMinimized = StartMinimizedInput.IsChecked == true, RunAtLogin = RunAtLoginInput.IsChecked == true, ReduceMotion = ReduceMotionInput.IsChecked == true, CheckUpdatesOnStartup = CheckUpdatesOnStartupInput.IsChecked == true, InspectAmdUpscaler = InspectAmdUpscalerInput.IsChecked == true, SensorRefreshMs = (int)SensorRefreshSlider.Value, FpsRefreshMs = (int)FpsRefreshSlider.Value, IgnoredApps = IgnoredApps.Text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToImmutableArray() });
 
     private void SensorRefreshChanged(object sender, RoutedPropertyChangedEventArgs<double> e) =>
         SensorRefreshLabel.Text = $"{e.NewValue:0} ms · up to {1000 / e.NewValue:0.##} sensor reads/sec";
+
+    private void FpsRefreshChanged(object sender, RoutedPropertyChangedEventArgs<double> e) =>
+        FpsRefreshLabel.Text = $"{e.NewValue:0} ms · up to {1000 / e.NewValue:0.##} display updates/sec";
 
     private void SettingsEdited(object sender, RoutedEventArgs e)
     {

@@ -90,6 +90,7 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
     public double OverlayScale { get; init; } = 1;
     public bool HideUnknownTechnology { get; init; } = true;
     public int SensorRefreshMs { get; init; } = 1000;
+    public int FpsRefreshMs { get; init; } = 100;
     public bool StartMinimized { get; init; }
     public bool RunAtLogin { get; init; }
     public bool ReduceMotion { get; init; }
@@ -153,6 +154,7 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
 
         if (!double.IsFinite(value.OverlayScale) || value.OverlayScale is < 0.5 or > 3) throw new InvalidDataException("Overlay size must be between 50% and 300%.");
         if (value.SensorRefreshMs is < 250 or > 3000 || value.SensorRefreshMs % 250 != 0) throw new InvalidDataException("Sensor refresh interval must be 250–3000 milliseconds in 250 millisecond steps.");
+        if (value.FpsRefreshMs is < 50 or > 250 || value.FpsRefreshMs % 50 != 0) throw new InvalidDataException("FPS display refresh interval must be 50–250 milliseconds in 50 millisecond steps.");
 
         if (!double.IsFinite(value.Opacity) || value.Opacity is < 0 or > 1) throw new InvalidDataException("Panel opacity must be between 0% and 100%.");
 
@@ -324,7 +326,7 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
     public static Preferences ApplyImportedLayout(Preferences current, Preferences imported) => Validate(imported with
     {
         Shortcut = current.Shortcut, OverlayEnabled = current.OverlayEnabled, IgnoredApps = current.IgnoredApps,
-        SensorRefreshMs = current.SensorRefreshMs, StartMinimized = current.StartMinimized, RunAtLogin = current.RunAtLogin,
+        SensorRefreshMs = current.SensorRefreshMs, FpsRefreshMs = current.FpsRefreshMs, StartMinimized = current.StartMinimized, RunAtLogin = current.RunAtLogin,
         ReduceMotion = current.ReduceMotion, CheckUpdatesOnStartup = current.CheckUpdatesOnStartup, InspectAmdUpscaler = current.InspectAmdUpscaler,
         GameTechnologyChoices = current.GameTechnologyChoices
     });

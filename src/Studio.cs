@@ -144,6 +144,7 @@ public partial class MainWindow
     private void ResetOverlaySize(object sender, MouseButtonEventArgs e) { OverlaySize.Value = 100; e.Handled = true; }
     private void ResetPanelOpacity(object sender, MouseButtonEventArgs e) { PanelOpacity.Value = 0.65; e.Handled = true; }
     private void ResetSensorRefresh(object sender, MouseButtonEventArgs e) { SensorRefreshSlider.Value = 1000; e.Handled = true; }
+    private void ResetFpsRefresh(object sender, MouseButtonEventArgs e) { FpsRefreshSlider.Value = 100; e.Handled = true; }
     private void ChangeZoom(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (!ready || zoomUpdating) return;
@@ -350,6 +351,7 @@ public partial class MainWindow
         CheckUpdatesOnStartupInput.IsChecked = draft.CheckUpdatesOnStartup;
         InspectAmdUpscalerInput.IsChecked = draft.InspectAmdUpscaler;
         SensorRefreshSlider.Value = draft.SensorRefreshMs;
+        FpsRefreshSlider.Value = draft.FpsRefreshMs;
         IgnoredApps.Text = string.Join(Environment.NewLine, draft.IgnoredApps);
         FontSelector.SelectedIndex = Array.IndexOf(new[] { "Consolas", "Segoe UI", "Arial", "Cascadia Mono" }, draft.Font);
         OverlaySize.Value = draft.OverlayScale * 100; OverlaySizeLabel.Text = $"{draft.OverlayScale:P0}";

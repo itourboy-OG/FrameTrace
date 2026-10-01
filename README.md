@@ -24,7 +24,7 @@
 
 ## Get Frame Trace
 
-Download the Windows x64 installer from [Releases](https://github.com/itourboy-OG/FrameTrace/releases/latest). Frame Trace checks for newer stable releases when it opens (optional) and from **Settings → Check now**. A compact notice offers **Update now** or **Not now**. Update now downloads the installer with percentage progress, verifies its size and SHA-256 against GitHub's release metadata, and opens Windows Setup to finish updating. Frame Trace closes cleanly before installation. Not now dismisses the notice without downloading. Updates never start without your choice.
+Download the Windows x64 installer from [Releases](https://github.com/itourboy-OG/FrameTrace/releases/latest). Frame Trace checks for newer stable releases when it opens (optional) and from **Settings → Check now**. A compact notice offers **Update now** or **Not now**. Update now downloads the installer with percentage progress, verifies its size and SHA-256 against GitHub's release metadata, and opens Windows Setup to finish updating. Frame Trace closes cleanly before installation. Not now dismisses the notice without downloading. The updater goes directly to the latest stable release, even from an older version; updates never start without your choice.
 
 The installer is unsigned in this early release, so Windows may show a SmartScreen warning. Review the source and release details before installing.
 
@@ -36,7 +36,7 @@ The installer is unsigned in this early release, so Windows may show a SmartScre
 - **Experimental upscaler clues:** an optional Settings switch reads Cyberpunk 2077's saved upscaler, preset, and frame-generation choices. In other games, it may only recognize loaded AMD FSR or Intel XeSS libraries. Overlay Studio also lets you confirm an FSR 4.1.1 or FSR 4 FG override for the most recently captured game or choose a running game if capture has not selected one yet; that choice is saved by executable and is not automatic verification.
 - **Overlay Studio:** drag or group-select items, add separate metrics and freeform text or artwork layers, rename labels, adjust colors, fonts, sizes, graphs, and opacity. Match the canvas to your monitor, use the grid and snapping, save or delete named presets, and test edits live. Hover help explains Studio controls; double-click sliders with stated defaults to reset them. The Undo button or Ctrl+Z on the canvas restores the preceding layout edit; Ctrl+Z still undoes text while editing a text field. Unsaved-edits prompts protect work before replacing a layout.
 - **Graphical layouts:** nine built-in presets include the compact horizontal strip. Live usage bars, gauges, graphs, GPU fan artwork, temperature alarms, and a game-name/icon/presentation-API item can be positioned on the canvas. Import an RTSS `.ovl` skin with its companion PNG, preview each artwork choice beside the list, and place supported artwork, animations, graphs, and bars from its layer positions; adjust the result or add individual pieces in Frame Trace.
-- **Settings:** customize the overlay shortcut and startup state, launch at Windows sign-in, start minimized, reduce background motion, ignore selected processes, adjust sensor polling, and choose whether to check for updates on startup.
+- **Settings:** customize the overlay shortcut and startup state, launch at Windows sign-in, start minimized, reduce background motion, ignore selected processes, adjust sensor polling and the separate FPS display update interval, and choose whether to check for updates on startup.
 - **Background work:** the decorative animation pauses when minimized or hidden. Capture and configured sensor polling continue, while hidden dashboard, studio, and overlay displays skip their refresh work. Visible graphs keep their real timestamps and stop requesting redraws when hidden or empty.
 - **Updates:** checks the public GitHub Releases API, offers an optional installer download with percentage progress and checksum verification, and starts Windows Setup after you choose Update now. Failed or canceled downloads are not installed. It does not upload performance readings.
 
@@ -82,7 +82,7 @@ Requirements: Windows 10 or later, .NET 9 SDK, and Inno Setup 6.
 
 ```powershell
 ./build.ps1
-./artifacts/app-0.8.19/FrameTrace.exe --smoke-test C:/path/to/test-results
+./artifacts/app-0.8.20/FrameTrace.exe --smoke-test C:/path/to/test-results
 ```
 
 The build creates a self-contained Windows x64 application and per-user installer. It downloads PresentMon 2.6.0 when needed and verifies its SHA-256 before packaging. The smoke test writes a `result.txt` report and screenshots; it uses real local sensors and ETW capture but does not validate every game or anti-cheat.
@@ -96,7 +96,6 @@ The build creates a self-contained Windows x64 application and per-user installe
 - Investigate a safe path for true exclusive-fullscreen overlays.
 - Explore reliable, cooperative reporting of in-game DLSS, FSR, XeSS, and frame-generation settings.
 - Improve the dashboard, accessibility options, and update experience based on player feedback.
-- Evaluate a separate FPS display update-rate setting; the existing sensor interval controls CPU, GPU, and RAM readings only.
 
 ## Source and contributions
 

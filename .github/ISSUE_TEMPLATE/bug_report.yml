@@ -11,7 +11,7 @@ body:
     attributes:
       label: Frame Trace version
       description: The version shown in the app window.
-      placeholder: "0.8.19"
+      placeholder: "0.8.20"
     validations:
       required: true
   - type: textarea
