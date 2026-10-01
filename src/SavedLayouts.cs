@@ -104,7 +104,6 @@ public partial class MainWindow
             SavedLayouts.Save(name, draft, SavedLayouts.FilePath);
             CustomPresetSelector.ItemsSource = SavedLayouts.Read(SavedLayouts.FilePath);
             CustomPresetSelector.SelectedItem = CustomPresetSelector.Items.Cast<NamedLayout>().Single(item => item.Name == name);
-            SetLayoutBaseline();
             StudioStatus.Text = $"Saved preset ‘{name}’. Use Save & apply to activate it in-game. Saving this name again updates it.";
         }
         catch (Exception error) { Report("Custom preset was not saved", error); }
@@ -116,7 +115,7 @@ public partial class MainWindow
         if (!ConfirmLayoutReplacement($"load ‘{saved.Name}’")) return;
         try
         {
-            draft = SavedLayouts.Apply(draft, saved); LoadControls(); SetLayoutBaseline(); CustomPresetName.Text = saved.Name;
+            draft = SavedLayouts.Apply(draft, saved); LoadControls(); CustomPresetName.Text = saved.Name;
             StudioStatus.Text = $"Loaded ‘{saved.Name}’ in preview. Save & apply to activate it in-game.";
         }
         catch (Exception error) { Report("Custom preset could not be loaded", error); }

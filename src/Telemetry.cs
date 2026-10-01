@@ -14,11 +14,18 @@ public sealed record SensorReading(string Device, string HardwareType, string Na
 public sealed record FrameReading(long ReceivedAt, int ProcessId, string Application, string Runtime, string SwapChain, string FrameType, string PresentMode, double? FrameTime, double? DisplayedTime, double StartedAt);
 public sealed record FrameSummary(double? AppFps, double? DisplayFps, double? FrameTime, string Generation, string PresentMode, ImmutableArray<double> Times)
 {
+    public UpscalerObservation Upscaler { get; init; } = UpscalerObservation.Unknown;
     public double? AverageFps { get; init; }
     public double? LowFps { get; init; }
     public int SampleCount { get; init; }
     public ImmutableArray<FramePoint> Points { get; init; } = [];
 }
+public sealed record UpscalerObservation(string Label, bool HasEvidence)
+{
+    public string? FrameGenerationSetting { get; init; }
+    public string? Mode { get; init; }
+    public static UpscalerObservation Unknown => new("Not identified", false);
+}
 public sealed record FramePoint(double At, double Milliseconds);
 
 /// <summary>Reads vendor-provided sensors without changing hardware settings. Missing values remain unavailable.</summary>

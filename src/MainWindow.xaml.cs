@@ -20,6 +20,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 
 using System.Windows.Media;
+using System.Windows.Threading;
 
 using Microsoft.Win32;
 
@@ -36,6 +37,7 @@ public partial class MainWindow : Window
     private readonly CancellationTokenSource shutdown = new();
 
     private readonly OverlayCanvas preview = new();
+    private readonly DispatcherTimer saveFeedbackTimer = new() { Interval = TimeSpan.FromSeconds(3) };
 
     private Preferences preferences = Preferences.Initial;
 
@@ -70,9 +72,19 @@ public partial class MainWindow : Window
 
     private string lastMode = "";
     private int gameIconPid;
+    private int overlayForegroundPid;
     private ImageSource? gameIcon;
     private string gameRuntime = "—";
+    private string activeApplication = "";
     private string gameIconStatus = "";
+    private UpscalerObservation upscaler = UpscalerObservation.Unknown;
+    private int upscalerProcess;
+    private long nextUpscalerScan;
+    private Task<UpscalerObservation>? pendingUpscalerScan;
+    private int pendingUpscalerProcess;
+    private bool pendingCyberpunkSettings;
+    private long pendingUpscalerStarted;
+    private bool upscalerScanSlow;
 
     private Task<ImmutableArray<SensorReading>>? sensorRead;
 
@@ -87,6 +99,12 @@ public partial class MainWindow : Window
     {
 
         InitializeComponent();
+        SourceInitialized += (_, _) =>
+        {
+            try { Desktop.StyleTitleBar(this); }
+            catch (InvalidOperationException error) { Report("Title bar appearance could not be applied", error); }
+        };
+        saveFeedbackTimer.Tick += ClearSaveFeedback;
         Title = AppIdentity.ProductName;
         Height = Math.Min(Height, SystemParameters.WorkArea.Height);
         MinHeight = Math.Min(MinHeight, Height);
@@ -147,6 +165,10 @@ public partial class MainWindow : Window
 
         Closing += CloseAsync;
         PreviewKeyDown += UndoStudioShortcut;
+        SettingsPage.AddHandler(System.Windows.Controls.Primitives.ToggleButton.CheckedEvent, new RoutedEventHandler(SettingsEdited));
+        SettingsPage.AddHandler(System.Windows.Controls.Primitives.ToggleButton.UncheckedEvent, new RoutedEventHandler(SettingsEdited));
+        SettingsPage.AddHandler(System.Windows.Controls.Primitives.RangeBase.ValueChangedEvent, new RoutedPropertyChangedEventHandler<double>(SettingsEdited));
+        SettingsPage.AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler(SettingsEdited));
         StateChanged += (_, _) => { if (ready && WindowState != WindowState.Minimized) RenderData(); };
 
     }
@@ -177,6 +199,31 @@ public partial class MainWindow : Window
         {
 
             long now = Environment.TickCount64;
+            if (pendingUpscalerScan is { IsCompleted: true } completedScan)
+            {
+                pendingUpscalerScan = null;
+                try
+                {
+                    UpscalerObservation observed = await completedScan;
+                    if (preferences.InspectAmdUpscaler && upscalerProcess == pendingUpscalerProcess) upscaler = observed;
+                }
+                catch (Exception error) when (error is Win32Exception or InvalidOperationException or ArgumentException or UnauthorizedAccessException or IOException or JsonException)
+                {
+                    if (preferences.InspectAmdUpscaler && upscalerProcess == pendingUpscalerProcess)
+                        upscaler = new UpscalerObservation(pendingCyberpunkSettings ? "Cyberpunk settings unavailable"
+                            : error is Win32Exception { NativeErrorCode: 5 } or UnauthorizedAccessException
+                                ? "Game module access denied · FSR unknown"
+                                : "Game module inspection failed · FSR unknown", false);
+                    Diagnostics.Write("upscaler-inspection-unavailable", JsonSerializer.Serialize(new { ProcessId = pendingUpscalerProcess, Source = pendingCyberpunkSettings ? "Cyberpunk settings" : "game modules", Error = error.Message }));
+                }
+            }
+            if (pendingUpscalerScan is not null && !upscalerScanSlow && now - pendingUpscalerStarted >= 10000)
+            {
+                upscalerScanSlow = true;
+                if (preferences.InspectAmdUpscaler && upscalerProcess == pendingUpscalerProcess)
+                    upscaler = new UpscalerObservation(pendingCyberpunkSettings ? "Cyberpunk settings read is slow" : "Game module inspection is slow", false);
+                Diagnostics.Write("upscaler-inspection-slow", JsonSerializer.Serialize(new { ProcessId = pendingUpscalerProcess, Source = pendingCyberpunkSettings ? "Cyberpunk settings" : "game modules", ElapsedMs = now - pendingUpscalerStarted }));
+            }
 
             if (sensorRead is { IsCompleted: true })
 
@@ -205,6 +252,7 @@ public partial class MainWindow : Window
                 catch (Exception error) { Report("Capture restart cleanup failed", error); }
                 capture = null; target = 0; retries = 0; nextCapture = now;
                 summary = FrameMetrics.Summarize([], now); overlay?.Hide();
+                upscaler = UpscalerObservation.Unknown; upscalerProcess = 0;
                 GameName.Text = "Waiting for your game";
                 RetryButton.IsEnabled = true;
             }
@@ -247,10 +295,13 @@ public partial class MainWindow : Window
 
                     bool manual = selectedTarget.ProcessId != 0;
                     bool manualAlive = manualProcess is not null && !manualProcess.HasExited;
+                    bool manualIgnored = manual && preferences.IgnoredApps.Contains(selectedTarget.Application, StringComparer.OrdinalIgnoreCase);
                     CaptureCandidate? candidate = manual
-                        ? manualAlive ? candidates.FirstOrDefault(item => item.ProcessId == selectedTarget.ProcessId) : null
-                        : FrameMetrics.SelectForeground(candidates, foreground?.ProcessId ?? 0, preferences.IgnoredApps, Environment.ProcessId);
-                    if (manual) target = manualAlive ? selectedTarget.ProcessId : 0;
+                        ? manualAlive && !manualIgnored ? candidates.FirstOrDefault(item => item.ProcessId == selectedTarget.ProcessId) : null
+                        : FrameMetrics.SelectForeground(candidates, foreground?.ProcessId ?? 0, preferences.IgnoredApps, Environment.ProcessId)
+                            ?? FrameMetrics.SelectForeground(candidates, target, preferences.IgnoredApps, Environment.ProcessId);
+                    UpdateEditorGame(candidate);
+                    if (manual) target = manualAlive && !manualIgnored ? selectedTarget.ProcessId : 0;
 
                     if (candidate is not null)
 
@@ -262,7 +313,7 @@ public partial class MainWindow : Window
 
                         if (foreground?.ProcessId == candidate.ProcessId) FollowGameDisplay(foreground.Monitor);
 
-                        GameName.Text = manual ? selectedTarget.Title : string.IsNullOrWhiteSpace(foreground!.Title) ? candidate.Application : foreground.Title;
+                        GameName.Text = manual ? selectedTarget.Title : foreground?.ProcessId == candidate.ProcessId && !string.IsNullOrWhiteSpace(foreground.Title) ? foreground.Title : candidate.Application;
                         gameRuntime = candidate.Runtime;
                         if (gameIconPid != candidate.ProcessId)
                         {
@@ -275,9 +326,33 @@ public partial class MainWindow : Window
                             }
                         }
 
+                        if (upscalerProcess != candidate.ProcessId)
+                        {
+                            upscalerProcess = candidate.ProcessId;
+                            upscaler = UpscalerObservation.Unknown;
+                            nextUpscalerScan = now;
+                        }
+                        if (preferences.InspectAmdUpscaler && pendingUpscalerScan is null && now >= nextUpscalerScan)
+                        {
+                            pendingUpscalerProcess = candidate.ProcessId;
+                            pendingCyberpunkSettings = Path.GetFileName(candidate.Application).Equals("Cyberpunk2077.exe", StringComparison.OrdinalIgnoreCase);
+                            pendingUpscalerStarted = now;
+                            upscalerScanSlow = false;
+                            nextUpscalerScan = now + 5000;
+                            pendingUpscalerScan = pendingCyberpunkSettings
+                                ? Task.Run(() => CyberpunkUpscalerDetection.Inspect(CyberpunkUpscalerDetection.SettingsPath))
+                                : Task.Run(() => GameUpscalerDetection.InspectLoadedModules(candidate.ProcessId));
+                        }
+
                     }
 
-                    summary = capture.ReadSummary(target);
+                    if (candidate is null || !preferences.InspectAmdUpscaler) { upscaler = UpscalerObservation.Unknown; upscalerProcess = 0; }
+                    FrameSummary captured = capture.ReadSummary(target);
+                    GameTechnologyChoice? confirmed = preferences.GameTechnologyChoices.FirstOrDefault(item => item.Application.Equals(candidate?.Application, StringComparison.OrdinalIgnoreCase));
+                    UpscalerObservation selectedUpscaler = candidate is null ? UpscalerObservation.Unknown : GameTechnologyChoices.Apply(upscaler, confirmed);
+                    string generation = selectedUpscaler.FrameGenerationSetting is not { } gameSetting ? captured.Generation
+                        : captured.Generation == "Unavailable" ? gameSetting : captured.Generation + " · " + gameSetting;
+                    summary = captured with { Upscaler = selectedUpscaler, Generation = generation };
 
                     if (summary.PresentMode != lastMode)
 
@@ -290,6 +365,7 @@ public partial class MainWindow : Window
                     }
 
                     CaptureState.Text = manual ? !manualAlive ? "Selected application closed · select its new instance, or choose Automatic."
+                        : manualIgnored ? "This application is ignored. Click Allow to capture it again."
                         : candidate is null ? "Selected application · no frame data arriving. Open the game, or try Restart capture."
                         : $"Capturing selected application · {candidate.Application} · {candidate.Runtime}"
                         : candidate is not null ? $"Capturing automatically · {candidate.Application} · {candidate.Runtime}"
@@ -302,16 +378,23 @@ public partial class MainWindow : Window
                     if (now >= nextCaptureDiagnostic)
                     {
                         nextCaptureDiagnostic = now + 5000;
-                        Diagnostics.Write("capture-activity", JsonSerializer.Serialize(new { ForegroundPid = foreground?.ProcessId, Target = target, Selected = candidate?.ProcessId, Activity = capture.Activity, Candidates = candidates }));
+                        Diagnostics.Write("capture-activity", JsonSerializer.Serialize(new { ForegroundPid = foreground?.ProcessId, Target = target, Selected = candidate?.ProcessId, ManualTarget = selectedTarget.ProcessId, ManualAlive = manualAlive, Activity = capture.Activity, Candidates = candidates }));
                     }
 
-                    if (enabled && candidate is not null && foreground?.ProcessId == candidate.ProcessId && (summary.AppFps.HasValue || summary.DisplayFps.HasValue))
+                    if (enabled && candidate is not null && (summary.AppFps.HasValue || summary.DisplayFps.HasValue))
                     {
                         Rect? selectedDisplay = (DisplaySelector.SelectedItem as DisplayInfo)?.Bounds;
-                        ShowLiveOverlay(SelectOverlayMonitor(foreground!.Monitor, FollowDisplay.IsChecked == true, selectedDisplay));
+                        Rect monitor = foreground?.ProcessId == candidate.ProcessId ? foreground.Monitor : selectedDisplay ?? throw new InvalidOperationException("Select a display before showing the overlay.");
+                        ShowLiveOverlay(SelectOverlayMonitor(monitor, FollowDisplay.IsChecked == true, selectedDisplay));
+                        if (foreground?.ProcessId == candidate.ProcessId)
+                        {
+                            if (overlayForegroundPid != candidate.ProcessId && overlay is { IsVisible: true }) Desktop.RaiseOverlay(overlay);
+                            overlayForegroundPid = candidate.ProcessId;
+                        }
+                        else overlayForegroundPid = 0;
                     }
 
-                    else overlay?.Hide();
+                    else { overlay?.Hide(); overlayForegroundPid = 0; }
                     }
 
                 }
@@ -337,6 +420,7 @@ public partial class MainWindow : Window
                 capture = null; retries++; nextCapture = now + 2000 * retries;
 
                 summary = FrameMetrics.Summarize([], now); overlay?.Hide();
+                upscaler = UpscalerObservation.Unknown; upscalerProcess = 0;
 
             }
 
@@ -381,6 +465,7 @@ public partial class MainWindow : Window
         FrameTimeText.Text = Readings.Format(summary.FrameTime, "ms"); GenerationText.Text = "Frame generation · " + summary.Generation;
 
         PresentMode.Text = summary.PresentMode;
+        UpscalerStatus.Text = "Upscaler · " + summary.Upscaler.Label;
 
         AverageFps.Text = summary.AverageFps?.ToString("0") ?? "—"; LowFps.Text = summary.LowFps?.ToString("0") ?? "—";
 
@@ -421,15 +506,29 @@ public partial class MainWindow : Window
 
     }
 
-    private Preferences CollectSettings() => Preferences.Validate(draft with { OverlayEnabled = OverlayStartup.IsChecked == true, StartMinimized = StartMinimizedInput.IsChecked == true, RunAtLogin = RunAtLoginInput.IsChecked == true, ReduceMotion = ReduceMotionInput.IsChecked == true, CheckUpdatesOnStartup = CheckUpdatesOnStartupInput.IsChecked == true, SensorRefreshMs = (int)SensorRefreshSlider.Value, IgnoredApps = IgnoredApps.Text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToImmutableArray() });
+    private Preferences CollectSettings() => Preferences.Validate(draft with { OverlayEnabled = OverlayStartup.IsChecked == true, StartMinimized = StartMinimizedInput.IsChecked == true, RunAtLogin = RunAtLoginInput.IsChecked == true, ReduceMotion = ReduceMotionInput.IsChecked == true, CheckUpdatesOnStartup = CheckUpdatesOnStartupInput.IsChecked == true, InspectAmdUpscaler = InspectAmdUpscalerInput.IsChecked == true, SensorRefreshMs = (int)SensorRefreshSlider.Value, IgnoredApps = IgnoredApps.Text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToImmutableArray() });
 
     private void SensorRefreshChanged(object sender, RoutedPropertyChangedEventArgs<double> e) =>
-        SensorRefreshLabel.Text = $"{e.NewValue:0} ms · {1000 / e.NewValue:0.##} reads/sec";
+        SensorRefreshLabel.Text = $"{e.NewValue:0} ms · up to {1000 / e.NewValue:0.##} sensor reads/sec";
+
+    private void SettingsEdited(object sender, RoutedEventArgs e)
+    {
+        if (!ready || loading) return;
+        SettingsSaveState.Text = "Unsaved changes";
+        SettingsSaveState.Foreground = Brushes.LightSalmon;
+    }
+
+    private void ClearSaveFeedback(object? sender, EventArgs e)
+    {
+        saveFeedbackTimer.Stop();
+        if (StudioSaveState.Text == "✓ Saved") StudioSaveState.Text = "";
+        if (SettingsSaveState.Text == "✓ Saved and applied.") SettingsSaveState.Text = "";
+    }
 
     private void SaveSettings(object sender, RoutedEventArgs e)
 
     {
-
+        bool savedToDisk = false;
         try
 
         {
@@ -443,8 +542,9 @@ public partial class MainWindow : Window
                     StartupRegistration.SetEnabled(next.RunAtLogin);
                     startupUpdated = true;
                 }
-                if (hotkey is not null) { hotkey.Replace(next.Shortcut); shortcutUpdated = true; }
+                if (hotkey is not null && next.Shortcut != preferences.Shortcut) { hotkey.Replace(next.Shortcut); shortcutUpdated = true; }
                 Preferences.Save(next);
+                savedToDisk = true;
             }
             catch
             {
@@ -457,12 +557,36 @@ public partial class MainWindow : Window
             AnimatedBackground.SetReducedMotion(next.ReduceMotion);
             SetLayoutBaseline();
 
-            StudioStatus.Text = "";
-            Status.Text = "Saved. Your overlay and shortcut are ready.";
+            string message = "✓ Saved and applied.";
+            if (hotkey is { IsRegistered: false })
+            {
+                try { hotkey.Replace(next.Shortcut); }
+                catch (Win32Exception)
+                {
+                    message = "✓ Saved, but the shortcut is unavailable. Close the other Frame Trace app or choose a different shortcut.";
+                }
+            }
+            StudioSaveState.Text = "✓ Saved";
+            StudioSaveState.Foreground = Brushes.MediumAquamarine;
+            StudioStatus.Text = message == "✓ Saved and applied." ? "" : message;
+            SettingsSaveState.Text = message;
+            SettingsSaveState.Foreground = message == "✓ Saved and applied." ? Brushes.MediumAquamarine : Brushes.LightSalmon;
+            saveFeedbackTimer.Stop();
+            saveFeedbackTimer.Start();
 
         }
 
-        catch (Exception error) { Report("Settings were not saved", error); }
+        catch (Exception error)
+        {
+            saveFeedbackTimer.Stop();
+            string message = savedToDisk ? "✓ Saved, but could not apply: " + error.Message : "✕ Not saved: " + error.Message;
+            StudioSaveState.Text = savedToDisk ? "✓ Saved" : "✕ Not saved";
+            StudioSaveState.Foreground = savedToDisk ? Brushes.MediumAquamarine : Brushes.LightSalmon;
+            StudioStatus.Text = message;
+            SettingsSaveState.Text = message;
+            SettingsSaveState.Foreground = Brushes.LightSalmon;
+            Report(savedToDisk ? "Saved settings could not be applied" : "Settings were not saved", error);
+        }
 
     }
 
@@ -492,7 +616,7 @@ public partial class MainWindow : Window
         {
             Preferences imported = Preferences.Parse(File.ReadAllText(dialog.FileName));
             if (!ConfirmLayoutReplacement("import this layout")) return;
-            draft = Preferences.ApplyImportedLayout(draft, imported); LoadControls(); SetLayoutBaseline();
+            draft = Preferences.ApplyImportedLayout(draft, imported); LoadControls();
             StudioStatus.Text = "Layout loaded in preview. Save & apply when ready.";
         }
 
@@ -506,7 +630,12 @@ public partial class MainWindow : Window
         draft = draft with { Sections = Preferences.Initial.Sections }; LoadControls();
     }
 
-    private void PageChanged(object sender, SelectionChangedEventArgs e) { if (ready && e.Source == Pages) RenderData(); }
+    private void PageChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ready || e.Source != Pages) return;
+        if (Pages.SelectedIndex == 1) LoadSection();
+        RenderData();
+    }
 
     private void ToggleOverlay(object sender, RoutedEventArgs e) { enabled = !enabled; if (!enabled) overlay?.Hide(); OverlayButton.Content = enabled ? "Overlay on" : "Overlay off"; }
 

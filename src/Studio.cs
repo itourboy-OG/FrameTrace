@@ -35,6 +35,13 @@ public partial class MainWindow
     private readonly Slider fanSize = new() { Minimum = 24, Maximum = 80, Value = 36, TickFrequency = 2, IsSnapToTickEnabled = true };
     private SectionStyle Selected => draft.Sections.Single(s => s.Key == ((SectionStyle)SectionSelector.SelectedItem).Key);
 
+    internal void UpdateEditorGame(CaptureCandidate? candidate)
+    {
+        if (candidate is null || activeApplication.Equals(candidate.Application, StringComparison.OrdinalIgnoreCase)) return;
+        activeApplication = candidate.Application;
+        if (Pages.SelectedIndex == 1) LoadSection();
+    }
+
     private void InitializeStudio()
     {
         displays = Desktop.Displays();
@@ -49,7 +56,7 @@ public partial class MainWindow
 #else
         CustomPresetSelector.ItemsSource = SavedLayouts.Read(SavedLayouts.FilePath);
 #endif
-        AddMetricSelector.ItemsSource = OverlayData.Build(readings, summary).SelectMany(section => section.Metrics.Where(metric => metric.Id != "upscaler").Select(metric => new MetricChoice(section.Kind, metric.Id, section.Kind + " · " + metric.Label))).ToArray();
+        AddMetricSelector.ItemsSource = OverlayData.Build(readings, summary).SelectMany(section => section.Metrics.Select(metric => new MetricChoice(section.Kind, metric.Id, section.Kind + " · " + metric.Label))).ToArray();
         AddMetricSelector.SelectedIndex = 0;
         AutomationProperties.SetAutomationId(themeCardToggle, "ThemeCard");
         AutomationProperties.SetAutomationId(usageGaugeToggle, "LiveUsageGauge");
@@ -240,7 +247,7 @@ public partial class MainWindow
         if (!ConfirmLayoutReplacement($"load ‘{name}’")) return;
         draft = LayoutPresets.Create(draft, name); preview.Apply(draft); RefreshTestOverlay();
         preview.UpdateData(OverlayData.Build(readings, summary));
-        draft = preview.ArrangePreset(name); LoadControls(); SetLayoutBaseline();
+        draft = preview.ArrangePreset(name); LoadControls();
         StudioStatus.Text = name + " is ready in preview. Save & apply when it looks right.";
     }
 
@@ -255,6 +262,19 @@ public partial class MainWindow
 
     private void RefreshLayoutNotice()
     {
+        if (Preferences.HasLayoutChanges(draft, layoutBaseline))
+        {
+            if (StudioSaveState.Text.StartsWith("✓", StringComparison.Ordinal))
+            {
+                StudioSaveState.Text = "Unsaved edits";
+                StudioSaveState.Foreground = Brushes.LightSalmon;
+            }
+            if (SettingsSaveState.Text.StartsWith("✓", StringComparison.Ordinal))
+            {
+                SettingsSaveState.Text = "Unsaved overlay edits";
+                SettingsSaveState.Foreground = Brushes.LightSalmon;
+            }
+        }
         if (gestureStart is not null)
         {
             if (observedLayout is not null && LayoutReferenceChanged(draft, observedLayout))
@@ -328,6 +348,7 @@ public partial class MainWindow
         RunAtLoginInput.IsChecked = draft.RunAtLogin;
         ReduceMotionInput.IsChecked = draft.ReduceMotion;
         CheckUpdatesOnStartupInput.IsChecked = draft.CheckUpdatesOnStartup;
+        InspectAmdUpscalerInput.IsChecked = draft.InspectAmdUpscaler;
         SensorRefreshSlider.Value = draft.SensorRefreshMs;
         IgnoredApps.Text = string.Join(Environment.NewLine, draft.IgnoredApps);
         FontSelector.SelectedIndex = Array.IndexOf(new[] { "Consolas", "Segoe UI", "Arial", "Cascadia Mono" }, draft.Font);
@@ -384,33 +405,99 @@ public partial class MainWindow
         ValueColor.BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(section.ValueColor)); ValueColor.BorderThickness = new Thickness(3);
         MetricOptions.Children.Clear(); metricChecks.Clear();
         if (section.Kind == SectionKind.Frames)
-            MetricOptions.Children.Add(new TextBlock { Text = "Upscaler detection is not available. FG identification supports tagged AFMF / XeSS-FG only; unknown does not mean disabled.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 0, 0, 8) });
+        {
+            MetricOptions.Children.Add(new TextBlock { Text = "Cyberpunk shows saved upscaler and frame-generation choices. Other games may show loaded AMD FSR or Intel XeSS libraries; that does not prove the active mode.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 0, 0, 8) });
+            Border confirmations = new() { Background = new SolidColorBrush(Color.FromRgb(27, 39, 50)), BorderBrush = new SolidColorBrush(Color.FromRgb(53, 71, 86)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(8), Margin = new Thickness(0, 0, 0, 10) };
+            StackPanel content = new(); confirmations.Child = content;
+            string[] games = RunningEditorGames();
+            if (activeApplication.Length == 0 && games.Length == 1) activeApplication = games[0];
+            content.Children.Add(new TextBlock { Text = "GAME FOR YOUR CONFIRMATION", Foreground = Brushes.MediumAquamarine, Margin = new Thickness(0, 0, 0, 6) });
+            ComboBox gamePicker = new() { ItemsSource = games, SelectedItem = activeApplication.Length == 0 ? null : activeApplication, Style = (Style)FindResource("CaptureTargetStyle"), MaxDropDownHeight = 260, ToolTip = "Choose a running game. This choice stays available if you switch from the game to Frame Trace.", Margin = new Thickness(0, 0, 0, 8) };
+            AutomationProperties.SetAutomationId(gamePicker, "ConfirmationGame");
+            gamePicker.SelectionChanged += (_, _) =>
+            {
+                if (loading || gamePicker.SelectedItem is not string application || activeApplication.Equals(application, StringComparison.OrdinalIgnoreCase)) return;
+                activeApplication = application;
+                LoadSection();
+            };
+            content.Children.Add(gamePicker);
+            if (games.Length == 0) content.Children.Add(new TextBlock { Text = "Open a game, then return to Overlay Studio to choose it.", Foreground = Brushes.LightSlateGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
+            GameTechnologyChoice? choice = draft.GameTechnologyChoices.FirstOrDefault(item => item.Application.Equals(activeApplication, StringComparison.OrdinalIgnoreCase));
+            CheckBox confirmedFsr411 = new() { Content = "My game uses FSR 4.1.1 upscaling", IsChecked = choice?.Fsr411 == true, IsEnabled = activeApplication.Length != 0, ToolTip = "Your per-game confirmation, not automatic detection. Changes the displayed FSR version; keeps the detected quality preset when available." };
+            CheckBox confirmedFsr4Fg = new() { Content = "My game uses FSR 4 frame generation", IsChecked = choice?.Fsr4FrameGeneration == true, IsEnabled = activeApplication.Length != 0, ToolTip = "Your per-game confirmation, not automatic detection. Shows FSR 4 FG; keeps Cyberpunk's saved On/Off state when available." };
+            AutomationProperties.SetAutomationId(confirmedFsr411, "ConfirmFsr411");
+            AutomationProperties.SetAutomationId(confirmedFsr4Fg, "ConfirmFsr4Fg");
+            confirmedFsr411.Click += (_, _) => EditGameTechnologyChoice(confirmedFsr411, confirmedFsr4Fg);
+            confirmedFsr4Fg.Click += (_, _) => EditGameTechnologyChoice(confirmedFsr411, confirmedFsr4Fg);
+            content.Children.Add(confirmedFsr411); content.Children.Add(confirmedFsr4Fg);
+            content.Children.Add(new TextBlock { Text = "These are your choices for this game, not verified runtime readings. Save & apply to use them in the overlay.", Foreground = Brushes.LightSlateGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5, 0, 0) });
+            MetricOptions.Children.Add(confirmations);
+        }
         if (section.Kind == SectionKind.Game)
             MetricOptions.Children.Add(new TextBlock { Text = "D3D9 is identified separately. DXGI is the presentation API shared by newer Direct3D versions; the exact version is not available from capture.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 0, 0, 8) });
         ImmutableArray<MetricValue> available = OverlayData.Build(readings, summary).FirstOrDefault(d => d.Kind == section.Kind)?.Metrics ?? [];
+        if (section.Metrics.Length > 1)
+        {
+            Button splitAll = new() { Content = "Split all readings", ToolTip = "Keep the first reading here and create one movable item for each other reading.", Margin = new Thickness(0, 0, 0, 10) };
+            AutomationProperties.SetAutomationId(splitAll, "SplitAllMetrics");
+            splitAll.Click += SplitAllMetrics;
+            MetricOptions.Children.Add(splitAll);
+        }
+        if (section.Metrics.Length == 1)
+        {
+            SectionStyle[] targets = draft.Sections.Where(item => item.Key != section.Key && item.Kind == section.Kind && !item.Metrics.Contains(section.Metrics[0])).ToArray();
+            if (targets.Length > 0)
+            {
+                MetricOptions.Children.Add(new TextBlock { Text = "JOIN WITH ANOTHER ITEM", Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 0, 0, 5) });
+                ComboBox targetPicker = new() { ItemsSource = targets, ItemTemplate = SectionSelector.ItemTemplate, SelectedIndex = 0, Style = (Style)FindResource("CaptureTargetStyle") };
+                AutomationProperties.SetAutomationId(targetPicker, "JoinMetricTarget");
+                MetricOptions.Children.Add(targetPicker);
+                Button join = new() { Content = "Join reading", ToolTip = "Move this reading into the chosen item, then remove this item.", Margin = new Thickness(0, 6, 0, 10) };
+                AutomationProperties.SetAutomationId(join, "JoinMetric");
+                join.Click += (_, _) => JoinMetric(((SectionStyle)targetPicker.SelectedItem).Key);
+                MetricOptions.Children.Add(join);
+            }
+        }
         foreach (string id in section.Metrics.Concat(Preferences.AvailableMetrics(section.Kind).Except(section.Metrics)))
         {
             MetricValue metric = available.Single(m => m.Id == id);
-            DockPanel row = new() { Margin = new Thickness(0, 3, 0, 3) };
-            CheckBox check = new() { Tag = id, IsChecked = section.Metrics.Contains(id), ToolTip = metric.Label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
+            Border card = new() { Background = new SolidColorBrush(Color.FromRgb(27, 39, 50)), BorderBrush = new SolidColorBrush(Color.FromRgb(53, 71, 86)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(8), Margin = new Thickness(0, 0, 0, 7) };
+            StackPanel content = new(); card.Child = content;
+            DockPanel header = new(); content.Children.Add(header);
+            CheckBox check = new() { Tag = id, IsChecked = section.Metrics.Contains(id), ToolTip = "Show or hide " + metric.Label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 7, 0) };
             AutomationProperties.SetAutomationId(check, "MetricVisible_" + id);
             AutomationProperties.SetName(check, "Show " + metric.Label);
-            if (id == "upscaler" && !section.Metrics.Contains(id)) { check.IsEnabled = false; check.ToolTip = "Upscaler detection is not implemented; unavailable for new layouts."; }
-            check.Click += EditSection; metricChecks.Add(id, check); row.Children.Add(check);
+            check.Click += EditSection; metricChecks.Add(id, check);
             StackPanel arrows = new() { Orientation = Orientation.Horizontal };
             Button up = new() { Content = "↑", Padding = new Thickness(5, 6, 5, 6), ToolTip = "Move up", IsEnabled = section.Metrics.IndexOf(id) > 0 };
             Button down = new() { Content = "↓", Padding = new Thickness(5, 6, 5, 6), ToolTip = "Move down", IsEnabled = section.Metrics.Contains(id) && section.Metrics.IndexOf(id) < section.Metrics.Length - 1 };
             up.Click += (_, _) => MoveMetric(id, section.Metrics.IndexOf(id) - 1);
             down.Click += (_, _) => MoveMetric(id, section.Metrics.IndexOf(id) + 1);
             AutomationProperties.SetAutomationId(up, "MetricUp_" + id); AutomationProperties.SetAutomationId(down, "MetricDown_" + id);
-            arrows.Children.Add(up); arrows.Children.Add(down); DockPanel.SetDock(arrows, Dock.Right); row.Children.Add(arrows);
+            arrows.Children.Add(up); arrows.Children.Add(down); DockPanel.SetDock(arrows, Dock.Right); header.Children.Add(arrows);
+            DockPanel.SetDock(check, Dock.Left); header.Children.Add(check);
+            header.Children.Add(new TextBlock { Text = metric.Label, FontWeight = FontWeights.SemiBold, Foreground = section.Metrics.Contains(id) ? Brushes.MediumAquamarine : Brushes.LightSlateGray, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+            DockPanel editor = new() { Margin = new Thickness(0, 7, 0, 0) }; content.Children.Add(editor);
+            if (section.Metrics.Contains(id) && section.Metrics.Length > 1)
+            {
+                Button separate = new() { Content = "Move out", ToolTip = "Move this reading into its own movable item.", Padding = new Thickness(5, 6, 5, 6), Margin = new Thickness(0, 0, 5, 0) };
+                AutomationProperties.SetAutomationId(separate, "SeparateMetric_" + id);
+                separate.Click += (_, _) => SeparateMetric(id);
+                DockPanel.SetDock(separate, Dock.Right); editor.Children.Add(separate);
+            }
             TextBox label = new() { Text = section.Labels.TryGetValue(id, out string? custom) ? custom : metric.Label, MaxLength = 80, Padding = new Thickness(6), ToolTip = metric.Label + " · blank hides the label" };
             AutomationProperties.SetAutomationId(label, "MetricLabel_" + id);
             label.TextChanged += (_, _) => { if (!loading) UpdateSection(Selected with { Labels = Selected.Labels.SetItem(id, label.Text) }); };
-            row.Children.Add(label); MetricOptions.Children.Add(row);
+            editor.Children.Add(label); MetricOptions.Children.Add(card);
         }
         loading = false;
     }
+    private string[] RunningEditorGames() => RunningApplications.List().Select(item => item.Application)
+        .Concat(capture?.Candidates().Where(item => item.ProcessId != Environment.ProcessId).Select(item => item.Application) ?? [])
+        .Concat(selectedTarget.ProcessId == 0 ? [] : [selectedTarget.Application])
+        .Concat(activeApplication.Length == 0 ? [] : [activeApplication])
+        .Where(application => !draft.IgnoredApps.Contains(application, StringComparer.OrdinalIgnoreCase) || activeApplication.Equals(application, StringComparison.OrdinalIgnoreCase))
+        .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(application => application, StringComparer.OrdinalIgnoreCase).ToArray();
     private void UpdateFanStatus()
     {
         double? rpm = Readings.Find(readings, "Gpu", "Fan", "GPU Fan")?.Value;
@@ -421,6 +508,15 @@ public partial class MainWindow
             _ => $"Current fan: {rpm:0} RPM. The icon follows the reported speed."
         };
         fanStatus.Foreground = rpm is > 0 ? new SolidColorBrush(Color.FromRgb(131, 239, 205)) : Brushes.LightSlateGray;
+    }
+    private void EditGameTechnologyChoice(CheckBox confirmedFsr411, CheckBox confirmedFsr4Fg)
+    {
+        if (!ready || loading || activeApplication.Length == 0) return;
+        GameTechnologyChoice choice = new(activeApplication, confirmedFsr411.IsChecked == true, confirmedFsr4Fg.IsChecked == true);
+        draft = draft with { GameTechnologyChoices = GameTechnologyChoices.Set(draft.GameTechnologyChoices, choice) };
+        StudioSaveState.Text = "Unsaved game choices";
+        StudioSaveState.Foreground = Brushes.LightSalmon;
+        StudioStatus.Text = "Save & apply to show your confirmation for " + activeApplication + ".";
     }
     private void MoveMetric(string id, int index)
     {

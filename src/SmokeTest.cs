@@ -15,6 +15,36 @@ namespace FrameTrace;
 
 public static class SmokeTest
 {
+    public static void RunUpscaler()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "FrameTrace-upscaler-test-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            File.WriteAllText(path, """
+                {"data":[{"group_name":"/graphics/presets","options":[{"name":"ResolutionScaling","value":"FSR4"},{"name":"FSR4","value":"Performance"},{"name":"FrameGeneration","value":"FSR3"},{"name":"FSR3_FrameGeneration","value":false}]}]}
+                """);
+            UpscalerObservation cyberpunk = CyberpunkUpscalerDetection.Inspect(path);
+            Require(cyberpunk.Label == "FSR 4 · Performance" && cyberpunk.FrameGenerationSetting == "FSR 3 FG · Off", "Cyberpunk's saved FSR and frame-generation choices were not read.");
+            GameTechnologyChoice choice = new("Cyberpunk2077.exe", true, true);
+            UpscalerObservation confirmed = GameTechnologyChoices.Apply(cyberpunk, choice);
+            Require(confirmed.Label == "FSR 4.1.1 · Performance" && confirmed.FrameGenerationSetting == "FSR 4 FG · Off", "Per-game FSR confirmation lost the quality preset or saved Off state.");
+            Preferences saved = Preferences.Parse(JsonSerializer.Serialize(Preferences.Initial with { GameTechnologyChoices = [choice] }));
+            Require(saved.GameTechnologyChoices is [{ Application: "Cyberpunk2077.exe", Fsr411: true, Fsr4FrameGeneration: true }], "Per-game confirmations did not survive saving.");
+            Require(Preferences.ForLayoutExport(saved).GameTechnologyChoices.IsEmpty && Preferences.ApplyImportedLayout(saved, Preferences.Initial).GameTechnologyChoices.Length == 1, "Layout sharing changed local game confirmations.");
+            Require(GameTechnologyChoices.Set(saved.GameTechnologyChoices, new("Cyberpunk2077.exe", false, false)).IsEmpty, "Unchecking both confirmations did not remove the game entry.");
+            File.WriteAllText(path, """
+                {"data":[{"group_name":"/graphics/presets","options":[{"name":"ResolutionScaling","value":"XESS"},{"name":"XESS","value":"Quality"},{"name":"FrameGeneration","value":"XESS"},{"name":"XESS_FrameGeneration","value":true}]}]}
+                """);
+            UpscalerObservation intelGame = CyberpunkUpscalerDetection.Inspect(path);
+            Require(intelGame.Label == "XeSS · Quality" && intelGame.FrameGenerationSetting == "XeSS FG · On", "Cyberpunk's saved XeSS choice was not read.");
+            Require(GameUpscalerDetection.Identify(["libxess.dll"]).Label == "Intel XeSS runtime loaded · active mode unknown", "The Intel XeSS D3D12/Vulkan runtime was not identified.");
+            Require(GameUpscalerDetection.Identify(["libxess_dx11.dll"]).HasEvidence, "The Intel XeSS D3D11 runtime was not identified.");
+            Require(!GameUpscalerDetection.Identify(["libxess_fg.dll", "libxell.dll"]).HasEvidence, "XeSS frame generation or latency library was mistaken for upscaling.");
+            Require(GameUpscalerDetection.Identify(["libxess.dll", "amd_fidelityfx_upscaler_dx12.dll"]).Label.Contains("and Intel XeSS", StringComparison.Ordinal), "Games with both runtimes were labeled as only one vendor.");
+        }
+        finally { File.Delete(path); }
+    }
+
     public static async Task RunArtworkAsync(string skinPath, string outputDirectory)
     {
         Directory.CreateDirectory(outputDirectory);
@@ -284,6 +314,12 @@ public static class SmokeTest
             FrameSummary result = FrameMetrics.Summarize([a, b, generated], 120);
             Require(result.AppFps == 100 && result.DisplayFps == 200 && result.Generation == "AFMF 2.1", "Frame calculation failed.");
             Require(FrameMetrics.Summarize([a, b], 120).Generation == "Unavailable", "Application tags must not prove FG is off.");
+            UpscalerObservation detected = GameUpscalerDetection.Identify(["amd_fidelityfx_loader_dx12.dll", "AMD_FIDELITYFX_UPSCALER_DX12.DLL"]);
+            Require(detected.HasEvidence && detected.Label.Contains("runtime loaded", StringComparison.Ordinal), "Loaded AMD FSR runtime was not identified.");
+            Require(GameUpscalerDetection.Identify(["amd_fidelityfx_dx12.dll", "ffx_fsr3upscaler_x64.dll"]).HasEvidence, "Cyberpunk's loaded FSR upscaler library was not identified.");
+            Require(!GameUpscalerDetection.Identify(["amd_fidelityfx_loader_dx12.dll", "amd_fidelityfx_framegeneration_dx12.dll", "amd_fidelityfx_dx12.dll", "ffx_fsr3_x64.dll"]).HasEvidence, "A generic FidelityFX or frame-generation DLL was incorrectly identified as an upscaler.");
+            Require(OverlayData.Build([], result with { Upscaler = detected })[0].Metrics.Single(metric => metric.Id == "upscaler").Available, "The AMD FSR runtime was not available as an overlay metric.");
+            Require(!GameUpscalerDetection.InspectLoadedModules(Environment.ProcessId).HasEvidence, "The Frame Trace process was misidentified as an AMD game.");
             Require(FrameMetrics.Summarize([a, b], 2000).AppFps == 100, "Normal ETW batch delay discarded valid FPS.");
 
             Require(FrameMetrics.Summarize([a, b], 3200).AppFps is null, "Stale readings did not expire.");
@@ -298,10 +334,10 @@ public static class SmokeTest
             Preferences sensorRate = Preferences.Initial with { SensorRefreshMs = 2500 };
             Preferences.Write(sensorRate, Path.Combine(outputDirectory, "sensor-refresh.json"));
             Require(Preferences.Parse(File.ReadAllText(Path.Combine(outputDirectory, "sensor-refresh.json"))).SensorRefreshMs == 2500, "Sensor refresh preference did not survive saving.");
-            Preferences startup = Preferences.Initial with { StartMinimized = true, RunAtLogin = true, ReduceMotion = true, CheckUpdatesOnStartup = false };
+            Preferences startup = Preferences.Initial with { StartMinimized = true, RunAtLogin = true, ReduceMotion = true, CheckUpdatesOnStartup = false, InspectAmdUpscaler = true };
             Preferences.Write(startup, Path.Combine(outputDirectory, "settings.json"));
             Preferences restoredSettings = Preferences.Parse(File.ReadAllText(Path.Combine(outputDirectory, "settings.json")));
-            Require(restoredSettings.StartMinimized && restoredSettings.RunAtLogin && restoredSettings.ReduceMotion && !restoredSettings.CheckUpdatesOnStartup, "Startup and accessibility preferences did not survive saving.");
+            Require(restoredSettings.StartMinimized && restoredSettings.RunAtLogin && restoredSettings.ReduceMotion && !restoredSettings.CheckUpdatesOnStartup && restoredSettings.InspectAmdUpscaler, "Startup, accessibility, or AMD inspection preferences did not survive saving.");
             Preferences localSettings = Preferences.Initial with { Shortcut = new Hotkey(3, 0x4B), OverlayEnabled = false, IgnoredApps = ["notepad.exe"], SensorRefreshMs = 1500, StartMinimized = true, RunAtLogin = true, ReduceMotion = true, CheckUpdatesOnStartup = false };
             Preferences sharedLayout = Preferences.ForLayoutExport(localSettings);
             Require(!sharedLayout.StartMinimized && !sharedLayout.RunAtLogin && !sharedLayout.ReduceMotion && sharedLayout.CheckUpdatesOnStartup && sharedLayout.IgnoredApps.SequenceEqual(Preferences.Initial.IgnoredApps), "Layout export included local startup, accessibility, update, or ignore-list settings.");
@@ -428,6 +464,7 @@ public static class SmokeTest
                     window.RefreshCaptureTargets();
                     ComboBox targetSelector = (ComboBox)window.FindName("CaptureTargetSelector");
                     CaptureTarget manual = targetSelector.Items.Cast<CaptureTarget>().Single(item => item.ProcessId == probe.Id);
+                    Require(manual.IsPresenting && manual.Application.Equals(Path.GetFileName(Environment.ProcessPath!), StringComparison.OrdinalIgnoreCase), "The capture picker did not identify the process reporting live frames.");
                     Require(!targetSelector.Items.Cast<CaptureTarget>().Any(item => item.ProcessId == Environment.ProcessId), "Process picker included its own dashboard.");
                     targetSelector.SelectedItem = manual;
                     Require(FindButton(window, "IgnoreCaptureButton").IsEnabled && !FindButton(window, "AllowCaptureButton").IsEnabled, "Dashboard capture-rule actions did not reflect the selected application.");
@@ -782,7 +819,10 @@ public static class SmokeTest
             CheckSignalPanels(outputDirectory);
             await CheckLiveEditingAsync(window, outputDirectory);
             CheckThemeWidgetsEditor(window, outputDirectory);
-            File.WriteAllText(Path.Combine(outputDirectory, "result.txt"), "PASS: live test window, overlay visibility while editing, label updates before saving, closing and reopening, Stop test, restoring saved layout, and preserving preferences. FPS capture is verified separately.");
+            CheckMetricGrouping(window);
+            CheckGameConfirmations(window);
+            CheckScrollBars(window);
+            File.WriteAllText(Path.Combine(outputDirectory, "result.txt"), "PASS: live overlay editing, metric split and join, restoring saved layout, and preserving preferences. FPS capture is verified separately.");
         }
         catch (Exception error)
         {
@@ -872,7 +912,7 @@ public static class SmokeTest
         Task discard = RespondToLayoutPromptAsync("6");
         FindButton(window, "ApplyPresetButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await discard;
-        Require(name.Text != "KEEP MY EDITS" && notice.Visibility == Visibility.Collapsed, "Confirming preset replacement did not load a clean layout.");
+        Require(name.Text != "KEEP MY EDITS" && notice.Visibility == Visibility.Visible, "Confirming preset replacement did not load a layout awaiting Save & apply.");
         name.Text = "KEEP CUSTOM EDITS";
         Task keepCustom = RespondToLayoutPromptAsync("7");
         FindButton(window, "LoadCustomPresetButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -881,7 +921,7 @@ public static class SmokeTest
         Task discardCustom = RespondToLayoutPromptAsync("6");
         FindButton(window, "LoadCustomPresetButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         await discardCustom;
-        Require(notice.Visibility == Visibility.Collapsed && ((TextBox)window.FindName("CustomPresetName")).Text == "OG", "Loading a saved preset did not establish a clean layout.");
+        Require(notice.Visibility == Visibility.Visible && ((TextBox)window.FindName("CustomPresetName")).Text == "OG", "Loading a saved preset did not leave it awaiting Save & apply.");
     }
 
     private static Task RespondToLayoutPromptAsync(string buttonId) => Task.Run(async () =>
@@ -1119,6 +1159,57 @@ public static class SmokeTest
         Grid updatedGrid = FrameMetricsGrid(canvas);
         Require(updatedGrid.ColumnDefinitions[0].Width.Value == initialLabelWidth, "Adding or renaming a table metric shifted the FPS value column.");
         Require(updatedGrid.Children.OfType<TextBlock>().Any(text => text.Text == "AFMF 2.1 generated display FPS" && text.TextWrapping == TextWrapping.NoWrap), "Long metric labels must stay on one line within the stable label column.");
+    }
+    private static void CheckMetricGrouping(MainWindow window)
+    {
+        ComboBox sections = (ComboBox)window.FindName("SectionSelector");
+        TabControl inspector = (TabControl)window.FindName("StudioInspectorTabs");
+        inspector.SelectedItem = inspector.Items.Cast<TabItem>().Single(item => AutomationProperties.GetAutomationId(item) == "StudioMetricsTab");
+        SectionStyle frames = sections.Items.Cast<SectionStyle>().Single(item => item.Kind == SectionKind.Frames && item.Id.Length == 0);
+        Require(frames.Metrics.Length > 1, "The FPS item needs multiple readings for the grouping check.");
+        string first = frames.Metrics[0], second = frames.Metrics[1];
+        int originalCount = sections.Items.Count;
+        sections.SelectedItem = frames;
+        window.UpdateLayout();
+        CheckBox[] confirmations = Descendants(window).OfType<CheckBox>().Where(item => AutomationProperties.GetAutomationId(item) is "ConfirmFsr411" or "ConfirmFsr4Fg").ToArray();
+        Require(confirmations.Length == 2 && Descendants(window).OfType<ComboBox>().Any(item => AutomationProperties.GetAutomationId(item) == "ConfirmationGame"), "The FPS editor must offer a running-game choice for FSR confirmations.");
+        Descendants(window).OfType<Button>().Single(item => AutomationProperties.GetAutomationId(item) == "SplitAllMetrics").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Require(sections.Items.Count == originalCount + frames.Metrics.Length - 1, "Splitting FPS readings did not create independent items.");
+        SectionStyle separate = sections.Items.Cast<SectionStyle>().Single(item => item.Kind == SectionKind.Frames && item.Metrics.SequenceEqual([second]));
+        sections.SelectedItem = separate;
+        ComboBox target = Descendants(window).OfType<ComboBox>().Single(item => AutomationProperties.GetAutomationId(item) == "JoinMetricTarget");
+        target.SelectedItem = target.Items.Cast<SectionStyle>().Single(item => item.Metrics.SequenceEqual([first]));
+        Descendants(window).OfType<Button>().Single(item => AutomationProperties.GetAutomationId(item) == "JoinMetric").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        SectionStyle joined = (SectionStyle)sections.SelectedItem;
+        Require(joined.Metrics.SequenceEqual([first, second]) && sections.Items.Count == originalCount + frames.Metrics.Length - 2, "Joining FPS readings did not create the selected pair.");
+        Descendants(window).OfType<Button>().Single(item => AutomationProperties.GetAutomationId(item) == "SeparateMetric_" + second).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Require(sections.Items.Cast<SectionStyle>().Any(item => item.Kind == SectionKind.Frames && item.Metrics.SequenceEqual([first])) && ((SectionStyle)sections.SelectedItem).Metrics.SequenceEqual([second]), "Moving one FPS reading out of a pair failed.");
+        Preferences.Validate(Preferences.Initial with { Sections = sections.Items.Cast<SectionStyle>().ToImmutableArray() });
+    }
+    private static void CheckGameConfirmations(MainWindow window)
+    {
+        ComboBox sections = (ComboBox)window.FindName("SectionSelector");
+        sections.SelectedItem = sections.Items.Cast<SectionStyle>().First(item => item.Kind == SectionKind.Frames);
+        window.UpdateEditorGame(new CaptureCandidate(42, "Cyberpunk2077.exe", 2, "DXGI", 0));
+        window.UpdateLayout();
+        CheckBox[] confirmations = Descendants(window).OfType<CheckBox>().Where(item => AutomationProperties.GetAutomationId(item) is "ConfirmFsr411" or "ConfirmFsr4Fg").ToArray();
+        Require(confirmations.Length == 2 && confirmations.All(item => item.IsEnabled), "A captured game's FSR confirmations were not enabled in Overlay Studio.");
+        window.UpdateEditorGame(null);
+        window.UpdateLayout();
+        CheckBox[] afterFocusChange = Descendants(window).OfType<CheckBox>().Where(item => AutomationProperties.GetAutomationId(item) is "ConfirmFsr411" or "ConfirmFsr4Fg").ToArray();
+        Require(afterFocusChange.Length == 2 && afterFocusChange.All(item => item.IsEnabled), "Switching focus to Overlay Studio disabled the last captured game's confirmations.");
+    }
+    private static void CheckScrollBars(MainWindow window)
+    {
+        ((TabControl)window.FindName("Pages")).SelectedIndex = 0;
+        window.Height = 760;
+        window.UpdateLayout();
+        ScrollViewer dashboard = (ScrollViewer)window.FindName("DashboardScroll");
+        Require(dashboard.ScrollableHeight > 100, "The dashboard did not expose its vertical scroll area.");
+        dashboard.ScrollToVerticalOffset(100);
+        window.UpdateLayout();
+        ScrollBar bar = Descendants(dashboard).OfType<ScrollBar>().Single(item => item.Orientation == Orientation.Vertical && item.IsVisible);
+        Require(dashboard.VerticalOffset > 0 && bar.Template.FindName("PART_Track", bar) is Track, "The themed scrollbar did not scroll the dashboard.");
     }
     private static Grid FrameMetricsGrid(OverlayCanvas canvas)
     {

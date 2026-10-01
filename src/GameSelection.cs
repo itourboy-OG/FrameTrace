@@ -15,7 +15,8 @@ namespace FrameTrace;
 
 public sealed record CaptureTarget(int ProcessId, DateTime Started, string Application, string Title)
 {
-    public string Label => ProcessId == 0 ? "Automatic — follow the active game" : $"{Title} · {Application} ({ProcessId})";
+    public bool IsPresenting { get; init; }
+    public string Label => ProcessId == 0 ? "Automatic — follow the active game" : $"{(IsPresenting ? "● LIVE FPS · " : "")}{Application} · {Title} ({ProcessId})";
     public static CaptureTarget Automatic => new(0, DateTime.MinValue, "", "");
 }
 
@@ -30,6 +31,15 @@ internal static class CaptureRules
 
 internal static class RunningApplications
 {
+    public static CaptureTarget? FromFrames(CaptureCandidate candidate)
+    {
+        using Process process = Process.GetProcessById(candidate.ProcessId);
+        string path = ExecutablePath(candidate.ProcessId);
+        string windows = Path.TrimEndingDirectorySeparator(Environment.GetFolderPath(Environment.SpecialFolder.Windows)) + Path.DirectorySeparatorChar;
+        return path.StartsWith(windows, StringComparison.OrdinalIgnoreCase) || !candidate.Application.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            ? null : new CaptureTarget(candidate.ProcessId, process.StartTime.ToUniversalTime(), candidate.Application, "Rendering process") { IsPresenting = true };
+    }
+
     public static BitmapSource Icon(int pid)
     {
         string path = ExecutablePath(pid);
@@ -112,11 +122,31 @@ public partial class MainWindow
     {
         try
         {
-            ImmutableArray<CaptureTarget> apps = RunningApplications.List();
+            ImmutableArray<CaptureCandidate> rendering = [];
+            try { rendering = capture?.Candidates() ?? []; }
+            catch (Exception error) when (error is IOException or InvalidOperationException or Win32Exception)
+            {
+                Diagnostics.Write("capture-target-frames-unavailable", System.Text.Json.JsonSerializer.Serialize(new { Error = error.Message }));
+            }
+            ImmutableArray<CaptureTarget> apps = RunningApplications.List().Select(item =>
+                rendering.FirstOrDefault(candidate => candidate.ProcessId == item.ProcessId) is { } candidate
+                    ? item with { Application = candidate.Application, IsPresenting = true } : item).ToImmutableArray();
+            foreach (CaptureCandidate candidate in rendering.Where(item => item.ProcessId != Environment.ProcessId && !apps.Any(app => app.ProcessId == item.ProcessId)))
+            {
+                try
+                {
+                    CaptureTarget? extra = RunningApplications.FromFrames(candidate);
+                    if (extra is not null) apps = apps.Add(extra);
+                }
+                catch (Exception error) when (error is ArgumentException or InvalidOperationException or Win32Exception)
+                {
+                    Diagnostics.Write("capture-target-changed", System.Text.Json.JsonSerializer.Serialize(new { candidate.ProcessId, Error = error.Message }));
+                }
+            }
             if (selectedTarget.ProcessId != 0 && !apps.Any(item => item.ProcessId == selectedTarget.ProcessId && item.Started == selectedTarget.Started))
                 apps = apps.Add(selectedTarget);
             refreshingTargets = true;
-            CaptureTargetSelector.ItemsSource = apps.Insert(0, CaptureTarget.Automatic);
+            CaptureTargetSelector.ItemsSource = apps.OrderByDescending(item => item.IsPresenting).ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase).ToImmutableArray().Insert(0, CaptureTarget.Automatic);
             CaptureTargetSelector.SelectedItem = ((ImmutableArray<CaptureTarget>)CaptureTargetSelector.ItemsSource)
                 .Single(item => item.ProcessId == selectedTarget.ProcessId && item.Started == selectedTarget.Started);
         }
@@ -158,8 +188,8 @@ public partial class MainWindow
         AllowCaptureButton.IsEnabled = ignored;
         IgnoreCaptureButton.IsEnabled = selected && !ignored;
         CaptureRuleStatus.Text = !selected ? "Select a running app to allow or ignore it in automatic capture."
-            : ignored ? $"{choice!.Application} is excluded from automatic capture."
-            : $"{choice!.Application} is allowed in automatic capture.";
+            : ignored ? $"{choice!.Application} is excluded as a capture target."
+            : $"{choice!.Application} can be captured.";
     }
 
     private void AllowCaptureTarget(object sender, RoutedEventArgs e)
@@ -168,7 +198,7 @@ public partial class MainWindow
         try
         {
             SaveCaptureRules(CaptureRules.Allow(ReadIgnoredApps(), choice.Application));
-            CaptureRuleStatus.Text = $"{choice.Application} is now allowed in automatic capture.";
+            CaptureRuleStatus.Text = $"Saved · {choice.Application} can be captured again.";
         }
         catch (Exception error) { Report("Could not allow automatic capture", error); }
     }
@@ -179,7 +209,7 @@ public partial class MainWindow
         try
         {
             SaveCaptureRules(CaptureRules.Ignore(ReadIgnoredApps(), choice.Application));
-            CaptureRuleStatus.Text = $"{choice.Application} is now excluded from automatic capture.";
+            CaptureRuleStatus.Text = $"Saved · {choice.Application} is excluded as a capture target.";
         }
         catch (Exception error) { Report("Could not exclude this application", error); }
     }
@@ -194,7 +224,9 @@ public partial class MainWindow
         Preferences.Save(updated);
         preferences = updated;
         draft = draft with { IgnoredApps = ignored };
+        string settingsState = SettingsSaveState.Text;
         IgnoredApps.Text = string.Join(Environment.NewLine, ignored);
+        SettingsSaveState.Text = settingsState;
         CaptureTargetSelector.SelectedIndex = 0;
         RefreshCaptureRuleButtons();
     }

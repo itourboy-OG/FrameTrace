@@ -34,6 +34,12 @@ public partial class App : Application
             Shutdown(Environment.ExitCode);
             return;
         }
+        if (e.Args.Length == 1 && e.Args[0] == "--upscaler-test")
+        {
+            SmokeTest.RunUpscaler();
+            Shutdown();
+            return;
+        }
         if (e.Args.Length == 2 && e.Args[0] == "--update-test")
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;

@@ -61,7 +61,7 @@ public static class OverlayData
 
         OverlaySectionData cpuSection = new(SectionKind.Cpu, cpuName, [Usage(sensors, "Cpu", "CPU Total"), new("temperature", "Temperature", Readings.Format(cpuTemperature?.Value, "°C")), new("power", "Power draw", Readings.Format(cpuPower?.Value, "W"))]);
         cpuSection = cpuSection with { Temperature = cpuTemperature?.Value };
-        return [new(SectionKind.Frames, "FRAMES", [new("app", "App FPS", frames.AppFps?.ToString("0") ?? "—"), new("display", "Display FPS", frames.DisplayFps?.ToString("0") ?? "—"), new("average", "Average FPS", frames.AverageFps?.ToString("0") ?? "—"), new("low", "1% low FPS", frames.LowFps?.ToString("0") ?? "—"), new("upscaler", "Upscaler", "Unsupported") { Available = false }, new("frametime", "Frame time", Readings.Format(frames.FrameTime, "ms")), new("generation", "Frame generation", frames.Generation) { Available = frames.Generation != "Unavailable" }]),
+        return [new(SectionKind.Frames, "FRAMES", [new("app", "App FPS", frames.AppFps?.ToString("0") ?? "—"), new("display", "Display FPS", frames.DisplayFps?.ToString("0") ?? "—"), new("average", "Average FPS", frames.AverageFps?.ToString("0") ?? "—"), new("low", "1% low FPS", frames.LowFps?.ToString("0") ?? "—"), new("upscaler", "Upscaler", frames.Upscaler.Label) { Available = frames.Upscaler.HasEvidence }, new("frametime", "Frame time", Readings.Format(frames.FrameTime, "ms")), new("generation", "Frame generation", frames.Generation) { Available = frames.Generation != "Unavailable" }]),
 
             gpuSection,
 

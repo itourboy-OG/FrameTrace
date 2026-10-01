@@ -30,9 +30,10 @@ The installer is unsigned in this early release, so Windows may show a SmartScre
 
 ## What works today
 
-- **Automatic capture:** follows the foreground application that is presenting frames. If detection misses a game, select its running process from the dashboard. The dashboard can also allow or exclude a selected executable from future automatic capture. You do not need to choose an executable file or start capture manually.
-- **Frame performance:** app/present FPS, observed display FPS, rolling average, 1% low, frame time, and a live frame-time graph.
+- **Automatic capture:** follows the foreground application that is presenting frames. The capture picker marks processes producing live FPS, and you can select one manually if automatic detection misses it. The dashboard can also allow or exclude a selected executable from future automatic capture. You do not need to choose an executable file or start capture manually.
+- **Frame performance:** app/present FPS, observed display FPS, rolling average, 1% low, frame time, and a live frame-time graph. The dashboard shows available upscaler and frame-generation readings beneath the FPS numbers.
 - **Hardware readings:** GPU load, temperature, power, clock, and VRAM; CPU load, temperature, and power where the sensor driver exposes them; physical RAM used.
+- **Experimental upscaler clues:** an optional Settings switch reads Cyberpunk 2077's saved upscaler, preset, and frame-generation choices. In other games, it may only recognize loaded AMD FSR or Intel XeSS libraries. Overlay Studio also lets you confirm an FSR 4.1.1 or FSR 4 FG override for the most recently captured game or choose a running game if capture has not selected one yet; that choice is saved by executable and is not automatic verification.
 - **Overlay Studio:** drag or group-select items, add separate metrics and freeform text or artwork layers, rename labels, adjust colors, fonts, sizes, graphs, and opacity. Match the canvas to your monitor, use the grid and snapping, save or delete named presets, and test edits live. Hover help explains Studio controls; double-click sliders with stated defaults to reset them. The Undo button or Ctrl+Z on the canvas restores the preceding layout edit; Ctrl+Z still undoes text while editing a text field. Unsaved-edits prompts protect work before replacing a layout.
 - **Graphical layouts:** nine built-in presets include the compact horizontal strip. Live usage bars, gauges, graphs, GPU fan artwork, temperature alarms, and a game-name/icon/presentation-API item can be positioned on the canvas. Import an RTSS `.ovl` skin with its companion PNG, preview each artwork choice beside the list, and place supported artwork, animations, graphs, and bars from its layer positions; adjust the result or add individual pieces in Frame Trace.
 - **Settings:** customize the overlay shortcut and startup state, launch at Windows sign-in, start minimized, reduce background motion, ignore selected processes, adjust sensor polling, and choose whether to check for updates on startup.
@@ -41,12 +42,26 @@ The installer is unsigned in this early release, so Windows may show a SmartScre
 
 The Windows smoke suite passes locally, including real PresentMon capture, sensor reads, process selection, the Overlay Studio, and its nine layouts. That does not establish compatibility with every PC or game.
 
+### In-game technology checks so far
+
+Cyberpunk has a readable local graphics-settings file, so Frame Trace can show its saved selection and preset, including XeSS when selected. It can also show the saved frame-generation On/Off choice when that setting is present. Other games store settings differently; a loaded upscaler library alone cannot reveal the active mode or quality preset. Protected games may block module inspection. These results concern **in-game technology information**, not whether FPS capture or the overlay works in each game.
+
+| Game | Upscaler information | Frame-generation information |
+| --- | --- | --- |
+| Cyberpunk 2077 | Saved FSR, DLSS, or XeSS choice and quality preset; player checked FSR 4 and XeSS | Saved FSR 3, DLSS, or XeSS FG On/Off choice when available; runtime output and driver/mod overrides are unverified |
+| Overwatch | Player saw AMD FSR runtime loaded; active mode and version unknown | Not identified |
+| Battlefield 6 | Game-module inspection was unavailable in the player's test | Not identified |
+| Forza Horizon 6 and the player-reported “Resonance of a Plagued Tale Legacy” | Player saw AMD FSR runtime loaded; active mode and version unknown | Not identified |
+
+The FSR 4.1.1 upscaler and FSR 4 FG labels are available as **manual per-game confirmations**, not automatic detection. Results can change with game updates, drivers, and permissions. More games need testing, and no result in this table guarantees the displayed FPS includes generated frames.
+
 ## Known limitations
 
-- **In-game upscaler details are not detected.** DLSS, FSR, XeSS upscaling modes and quality presets, and OptiScaler’s input/output configuration are not reported.
+- **Active in-game upscaler output is not verified.** The experimental check reads Cyberpunk 2077's saved upscaler and frame-generation choices, or recognizes known loaded AMD FSR and Intel XeSS upscaler libraries in other games. A game setting can be overridden by a mod or driver, and a loaded library does not prove it is active. Per-game FSR confirmations are user-provided. Outside Cyberpunk, DLSS remains unidentified; OptiScaler's input/output configuration is not reported. Leave process-module inspection off in anti-cheat games unless their rules permit it.
 - **RTSS import is experimental and partial.** It may change or be removed. Supported artwork and live widgets can use the skin's layer positions, but placement is approximate and may need manual alignment before saving. Custom formulas, combined RTSS instructions, and unsupported tables still require manual work. Keep the `.ovl` and companion PNG together when importing.
-- **Frame generation identification depends on data reported by the capture path.** AFMF 2.1 and Intel XeSS-FG can be identified when PresentMon reports their tags. DLSS frame generation, in-game FSR frame generation, and a guaranteed split between native and generated FPS are not supported. Missing data means unknown, not disabled.
+- **Frame generation identification depends on data reported by the capture path.** AFMF 2.1 and Intel XeSS-FG can be identified when PresentMon reports their tags. Cyberpunk's saved FSR 3, DLSS, or XeSS FG On/Off setting is separate from a verified runtime reading. The user can confirm an FSR 4 FG override for one game. In-game frame-generation output and a guaranteed split between native and generated FPS are not verified. Missing data means unknown, not disabled.
 - **True exclusive fullscreen is not supported by the desktop overlay.** Capture may still report frame data. Windowed and borderless games use the Windows desktop compositor; behavior can vary by title and driver.
+- **Returning to a game after Alt+Tab still needs live verification.** Version 0.8.19 attempts to bring the overlay above the game when focus returns, but Cyberpunk 2077 and other titles may behave differently. The dark native title bar requires Windows 11; Windows 10 retains its system title bar.
 - **Anti-cheat compatibility has not been certified.** Frame Trace does not inject code into games, but that alone cannot guarantee that every anti-cheat permits an overlay. Competitive-game compatibility and account safety have not been verified; follow each game's rules.
 - **Hardware support varies.** Sensor availability depends on the hardware, driver, permissions, and sensor driver. Broader AMD and NVIDIA testing is still needed.
 - **The installer is not code-signed.** SmartScreen may require an additional confirmation.
@@ -59,7 +74,7 @@ Installer downloads are saved under `%LOCALAPPDATA%\FrameTrace\Updates` only aft
 
 Diagnostics are exported only when you choose **Export diagnostics**. Diagnostic files can include hardware readings, process names, and recent frame data. Review a file before sharing it.
 
-Overlay layout exports share overlay appearance and positions without sharing your hotkey, ignored-app list, Windows startup choice, or update preference. Importing a layout leaves those local settings unchanged.
+Overlay layout exports share overlay appearance and positions without sharing your hotkey, ignored-app list, per-game technology confirmations, Windows startup choice, or update preference. Importing a layout leaves those local settings unchanged.
 
 ## Build from source
 
@@ -67,7 +82,7 @@ Requirements: Windows 10 or later, .NET 9 SDK, and Inno Setup 6.
 
 ```powershell
 ./build.ps1
-./artifacts/app-0.8.6/FrameTrace.exe --smoke-test C:/path/to/test-results
+./artifacts/app-0.8.19/FrameTrace.exe --smoke-test C:/path/to/test-results
 ```
 
 The build creates a self-contained Windows x64 application and per-user installer. It downloads PresentMon 2.6.0 when needed and verifies its SHA-256 before packaging. The smoke test writes a `result.txt` report and screenshots; it uses real local sensors and ETW capture but does not validate every game or anti-cheat.
@@ -77,9 +92,11 @@ The build creates a self-contained Windows x64 application and per-user installe
 - Validate AFMF 2.1 gameplay after the performance changes, including displaying the overlay on a second monitor.
 - Improve RTSS skin import for custom formulas and advanced widgets.
 - Test capture and overlay behavior across more games, graphics cards, drivers, and display modes.
+- Verify that the overlay remains visible after returning to Cyberpunk 2077 from another window.
 - Investigate a safe path for true exclusive-fullscreen overlays.
 - Explore reliable, cooperative reporting of in-game DLSS, FSR, XeSS, and frame-generation settings.
 - Improve the dashboard, accessibility options, and update experience based on player feedback.
+- Evaluate a separate FPS display update-rate setting; the existing sensor interval controls CPU, GPU, and RAM readings only.
 
 ## Source and contributions
 

@@ -90,10 +90,27 @@ public static class Desktop
         if (result == 0 && Marshal.GetLastPInvokeError() != 0) throw new Win32Exception(Marshal.GetLastPInvokeError(), "Cannot enable click-through overlay.");
     }
 
+    public static void StyleTitleBar(Window window)
+    {
+        if (Environment.OSVersion.Version.Build < 22000) return;
+        nint handle = new WindowInteropHelper(window).Handle;
+        int caption = 0x181310, text = 0xF8F4F1;
+        int result = DwmSetWindowAttribute(handle, 35, ref caption, sizeof(int));
+        if (result < 0) throw new InvalidOperationException("Windows could not apply the Frame Trace title bar color.", Marshal.GetExceptionForHR(result));
+        result = DwmSetWindowAttribute(handle, 36, ref text, sizeof(int));
+        if (result < 0) throw new InvalidOperationException("Windows could not apply the Frame Trace title text color.", Marshal.GetExceptionForHR(result));
+    }
+
     public static void PlaceOverlay(Window window, Rect monitor)
     {
         if (!SetWindowPos(new WindowInteropHelper(window).Handle, new nint(-1), (int)monitor.Left, (int)monitor.Top, (int)monitor.Width, (int)monitor.Height, 0x0010))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot place the overlay on the game's monitor.");
+    }
+
+    public static void RaiseOverlay(Window window)
+    {
+        if (!SetWindowPos(new WindowInteropHelper(window).Handle, new nint(-1), 0, 0, 0, 0, 0x0013))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot restore the overlay above the game after switching windows.");
     }
 
     public static void PlaceTestWindow(Window window, Rect bounds)
@@ -120,6 +137,7 @@ public static class Desktop
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)] private static extern nint GetWindowLongPtr(nint window, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)] private static extern nint SetWindowLongPtr(nint window, int index, nint value);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowPos(nint window, nint insertAfter, int x, int y, int cx, int cy, uint flags);
+    [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(nint window, int attribute, ref int value, int size);
 }
 
 /// <summary>Registers a replacement first so a shortcut conflict leaves the existing shortcut intact.</summary>
@@ -129,6 +147,7 @@ public sealed class HotkeyBinding : IDisposable
     private int id;
     private Hotkey? current;
     public HotkeyBinding(nint handle) => this.handle = handle;
+    public bool IsRegistered => id != 0;
     public bool Matches(nint messageId) => id != 0 && messageId == id;
     public void Replace(Hotkey next)
     {

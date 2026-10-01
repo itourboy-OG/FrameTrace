@@ -94,6 +94,8 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
     public bool RunAtLogin { get; init; }
     public bool ReduceMotion { get; init; }
     public bool CheckUpdatesOnStartup { get; init; } = true;
+    public bool InspectAmdUpscaler { get; init; }
+    public ImmutableArray<GameTechnologyChoice> GameTechnologyChoices { get; init; } = [];
 
     public static string FilePath => Path.Combine(AppIdentity.DataDirectory, "preferences.json");
 
@@ -163,6 +165,11 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
         if (value.IgnoredApps.IsDefault || value.IgnoredApps.Any(name => string.IsNullOrWhiteSpace(name) || name != Path.GetFileName(name) || !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)))
 
             throw new InvalidDataException("Ignored applications must be executable filenames, one per line.");
+
+        if (value.GameTechnologyChoices.IsDefault || value.GameTechnologyChoices.Length > 256 ||
+            value.GameTechnologyChoices.Any(item => item is null || string.IsNullOrWhiteSpace(item.Application) || item.Application.Length > 260 || item.Application != Path.GetFileName(item.Application) || !item.Application.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || !item.Fsr411 && !item.Fsr4FrameGeneration) ||
+            value.GameTechnologyChoices.Select(item => item.Application).Distinct(StringComparer.OrdinalIgnoreCase).Count() != value.GameTechnologyChoices.Length)
+            throw new InvalidDataException("Game technology confirmations must name unique executable files with at least one confirmed option.");
 
         if (value.Sections.IsDefault || value.Sections.Length > MaxOverlayItems || value.Sections.Any(section => section is null) || value.Sections.Select(section => section.Key).Distinct().Count() != value.Sections.Length)
 
@@ -318,7 +325,8 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
     {
         Shortcut = current.Shortcut, OverlayEnabled = current.OverlayEnabled, IgnoredApps = current.IgnoredApps,
         SensorRefreshMs = current.SensorRefreshMs, StartMinimized = current.StartMinimized, RunAtLogin = current.RunAtLogin,
-        ReduceMotion = current.ReduceMotion, CheckUpdatesOnStartup = current.CheckUpdatesOnStartup
+        ReduceMotion = current.ReduceMotion, CheckUpdatesOnStartup = current.CheckUpdatesOnStartup, InspectAmdUpscaler = current.InspectAmdUpscaler,
+        GameTechnologyChoices = current.GameTechnologyChoices
     });
 
     public static void Write(Preferences value, string path)
