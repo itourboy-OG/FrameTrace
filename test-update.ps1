@@ -11,7 +11,7 @@ function Stop-TestSession {
 
 $testRoot = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
-$release = Join-Path $PSScriptRoot 'artifacts/app-0.7.15'
+$release = Join-Path $PSScriptRoot 'artifacts/app-0.8.22'
 $ready = Join-Path $testRoot ([Guid]::NewGuid().ToString('N') + '.ready')
 $probe = Start-Process -FilePath (Join-Path $release 'FrameTrace.exe') -ArgumentList @('--capture-lifetime-probe', ('"{0}"' -f $ready)) -WindowStyle Hidden -PassThru
 try {
@@ -22,12 +22,14 @@ try {
     }
     $child = @(Get-CimInstance Win32_Process -Filter "Name='PresentMon.exe'" | Where-Object ParentProcessId -eq $probe.Id)
     if ($child.Count -ne 1) { throw 'Expected exactly one real capture child.' }
+    $sessions = @(& logman.exe query -ets | Select-String -Pattern ("FrameTrace-{0}-[0-9a-fA-F]{{32}}" -f $probe.Id) -AllMatches | ForEach-Object { $_.Matches.Value })
+    if ($sessions.Count -ne 1) { throw "Expected one Windows capture session for Frame Trace PID $($probe.Id); found $($sessions.Count)." }
+    $session = $sessions[0]
     $capture = [Diagnostics.Process]::GetProcessById($child[0].ProcessId)
     try {
         $probe.Kill(); $probe.WaitForExit()
         if (-not $capture.WaitForExit(5000)) { throw 'Capture child survived dashboard termination.' }
     } finally { $capture.Dispose() }
-    $session = [regex]::Match($child[0].CommandLine, '--session_name\s+(\S+)').Groups[1].Value
     & logman.exe query $session -ets | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Crash probe did not leave a Windows trace session to validate recovery.' }
     $orphanReclaimed = $false

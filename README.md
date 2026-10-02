@@ -30,13 +30,14 @@ The installer is unsigned in this early release, so Windows may show a SmartScre
 
 ## What works today
 
-- **Automatic capture:** follows the foreground application that is presenting frames. The capture picker marks processes producing live FPS, and you can select one manually if automatic detection misses it. The dashboard can also allow or exclude a selected executable from future automatic capture. You do not need to choose an executable file or start capture manually.
+- **Automatic capture:** follows the foreground application that is presenting frames. The capture picker marks processes producing live FPS, and you can select one manually if automatic detection misses it. The dashboard shows frame freshness, available AFMF capture tags, and AMD service status when installed. It can also allow or exclude a selected executable from future automatic capture. You do not need to choose an executable file or start capture manually.
 - **Frame performance:** app/present FPS, observed display FPS, rolling average, 1% low, frame time, and a live frame-time graph. The dashboard shows available upscaler and frame-generation readings beneath the FPS numbers.
 - **Hardware readings:** GPU load, temperature, power, clock, and VRAM; CPU load, temperature, and power where the sensor driver exposes them; physical RAM used.
 - **Experimental upscaler clues:** an optional Settings switch reads Cyberpunk 2077's saved upscaler, preset, and frame-generation choices. In other games, it may only recognize loaded AMD FSR or Intel XeSS libraries. Overlay Studio also lets you confirm an FSR 4.1.1 or FSR 4 FG override for the most recently captured game or choose a running game if capture has not selected one yet; that choice is saved by executable and is not automatic verification.
 - **Overlay Studio:** drag or group-select items, add separate metrics and freeform text or artwork layers, rename labels, adjust colors, fonts, sizes, graphs, and opacity. Match the canvas to your monitor, use the grid and snapping, save or delete named presets, and test edits live. Hover help explains Studio controls; double-click sliders with stated defaults to reset them. The Undo button or Ctrl+Z on the canvas restores the preceding layout edit; Ctrl+Z still undoes text while editing a text field. Unsaved-edits prompts protect work before replacing a layout.
 - **Graphical layouts:** nine built-in presets include the compact horizontal strip. Live usage bars, gauges, graphs, GPU fan artwork, temperature alarms, and a game-name/icon/presentation-API item can be positioned on the canvas. Import an RTSS `.ovl` skin with its companion PNG, preview each artwork choice beside the list, and place supported artwork, animations, graphs, and bars from its layer positions; adjust the result or add individual pieces in Frame Trace.
 - **Settings:** customize the overlay shortcut and startup state, launch at Windows sign-in, start minimized, reduce background motion, ignore selected processes, adjust sensor polling and the separate FPS display update interval, and choose whether to check for updates on startup.
+- **Support logs and changelog:** Settings can save a ZIP containing current diagnostics and recent error events to `Documents\Frame Trace Logs`, or open that folder for you. The Changelog tab shows recent published releases and their notes.
 - **Background work:** the decorative animation pauses when minimized or hidden. Capture and configured sensor polling continue, while hidden dashboard, studio, and overlay displays skip their refresh work. Visible graphs keep their real timestamps and stop requesting redraws when hidden or empty.
 - **Updates:** checks the public GitHub Releases API, offers an optional installer download with percentage progress and checksum verification, and starts Windows Setup after you choose Update now. Failed or canceled downloads are not installed. It does not upload performance readings.
 
@@ -72,7 +73,7 @@ Frame Trace stores preferences locally in `%LOCALAPPDATA%\FrameTrace`. On first 
 
 Installer downloads are saved under `%LOCALAPPDATA%\FrameTrace\Updates` only after you choose **Update now**. Their size and SHA-256 checksum are checked before Windows Setup is opened. Closing Frame Trace during a download cancels it and removes the partial file.
 
-Diagnostics are exported only when you choose **Export diagnostics**. Diagnostic files can include hardware readings, process names, and recent frame data. Review a file before sharing it.
+Frame Trace keeps a rotating event log in `%LOCALAPPDATA%\FrameTrace\diagnostics.jsonl` (the Preview uses `%LOCALAPPDATA%\FrameTracePreview`). Unhandled app errors are recorded there when Windows can deliver them; a hardware or driver crash may end the process without an app log. Choose **Settings → Save support log** to make one ZIP with the current diagnostic state and recent events, defaulting to `Documents\Frame Trace Logs`. **Open support folder** opens that folder. Nothing is uploaded automatically. Reports can contain hardware readings, process names, error details, and recent frame data, so review them before sharing.
 
 Overlay layout exports share overlay appearance and positions without sharing your hotkey, ignored-app list, per-game technology confirmations, Windows startup choice, or update preference. Importing a layout leaves those local settings unchanged.
 
@@ -82,7 +83,7 @@ Requirements: Windows 10 or later, .NET 9 SDK, and Inno Setup 6.
 
 ```powershell
 ./build.ps1
-./artifacts/app-0.8.20/FrameTrace.exe --smoke-test C:/path/to/test-results
+./artifacts/app-0.8.22/FrameTrace.exe --smoke-test C:/path/to/test-results
 ```
 
 The build creates a self-contained Windows x64 application and per-user installer. It downloads PresentMon 2.6.0 when needed and verifies its SHA-256 before packaging. The smoke test writes a `result.txt` report and screenshots; it uses real local sensors and ETW capture but does not validate every game or anti-cheat.
@@ -93,7 +94,6 @@ The build creates a self-contained Windows x64 application and per-user installe
 - Improve RTSS skin import for custom formulas and advanced widgets.
 - Test capture and overlay behavior across more games, graphics cards, drivers, and display modes.
 - Verify that the overlay remains visible after returning to Cyberpunk 2077 from another window.
-- Investigate a safe path for true exclusive-fullscreen overlays.
 - Explore reliable, cooperative reporting of in-game DLSS, FSR, XeSS, and frame-generation settings.
 - Improve the dashboard, accessibility options, and update experience based on player feedback.
 

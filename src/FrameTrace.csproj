@@ -16,7 +16,7 @@
 
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
 
-    <Version>0.8.20</Version>
+    <Version>0.8.22</Version>
 
     <AssemblyName>FrameTrace</AssemblyName>
 
@@ -35,7 +35,7 @@
   <PropertyGroup Condition="'$(PreviewBuild)' == 'true'">
     <DefineConstants>$(DefineConstants);PREVIEW_BUILD</DefineConstants>
     <ApplicationManifest>app-preview.manifest</ApplicationManifest>
-    <Version>0.8.20</Version>
+    <Version>0.8.22</Version>
     <AssemblyName>FrameTracePreview</AssemblyName>
     <Product>Frame Trace Preview</Product>
     <Title>Frame Trace Preview</Title>
@@ -46,6 +46,7 @@
     <Resource Include="Assets/FrameTrace.ico" /><Resource Include="Assets/FrameTrace.png" />
 
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="9.0.20" />
 
     <Content Include="../vendor/*" Link="vendor/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
 

@@ -17,6 +17,15 @@
           "System.Threading.AccessControl": "10.0.3"
         }
       },
+      "System.ServiceProcess.ServiceController": {
+        "type": "Direct",
+        "requested": "[9.0.20, )",
+        "resolved": "9.0.20",
+        "contentHash": "zy25dxYqHR8bmvqMVctBAOjiWZqtXG+6rdR4yOjQusVsUEOuyMZvx1yAitWk9Cc0iDsnmfhT/K5Br353FTSW7g==",
+        "dependencies": {
+          "System.Diagnostics.EventLog": "9.0.20"
+        }
+      },
       "BlackSharp.Core": {
         "type": "Transitive",
         "resolved": "1.0.7",
@@ -157,6 +166,11 @@
         "resolved": "10.0.2",
         "contentHash": "eih1MnL4tnSjHUhzae0dmpu50Sm0s54faHZc8yhzYfmubAubkBIIulYYN28fasD1m41mhl6Cenhs9/F0aLv3FA=="
       },
+      "System.Diagnostics.EventLog": {
+        "type": "Transitive",
+        "resolved": "9.0.20",
+        "contentHash": "6RY8Q4rHntBO+WM5kuzoscreU+eKAVp4o5pyqoNUxfmqpH2PBP2jWfFMzbh+13oPwZbmXGIY8YaQbF6SP1DuIQ=="
+      },
       "System.IO.Ports": {
         "type": "Transitive",
         "resolved": "10.0.3",
@@ -193,6 +207,15 @@
           "System.IO.Ports": "10.0.3",
           "System.Management": "10.0.2",
           "System.Threading.AccessControl": "10.0.3"
+        }
+      },
+      "System.ServiceProcess.ServiceController": {
+        "type": "Direct",
+        "requested": "[9.0.20, )",
+        "resolved": "9.0.20",
+        "contentHash": "zy25dxYqHR8bmvqMVctBAOjiWZqtXG+6rdR4yOjQusVsUEOuyMZvx1yAitWk9Cc0iDsnmfhT/K5Br353FTSW7g==",
+        "dependencies": {
+          "System.Diagnostics.EventLog": "9.0.20"
         }
       },
       "Mono.Posix.NETStandard": {
@@ -279,6 +302,11 @@
         "type": "Transitive",
         "resolved": "10.0.3",
         "contentHash": "L1gcOL5kcfeeujKQbqJmpeTLsT0c6DeaJ9w6PY9oZ+/WESyya+Zj7StKguXR5j93o3o86FjcN05yufpoCz7R2g=="
+      },
+      "System.Diagnostics.EventLog": {
+        "type": "Transitive",
+        "resolved": "9.0.20",
+        "contentHash": "6RY8Q4rHntBO+WM5kuzoscreU+eKAVp4o5pyqoNUxfmqpH2PBP2jWfFMzbh+13oPwZbmXGIY8YaQbF6SP1DuIQ=="
       },
       "System.IO.Ports": {
         "type": "Transitive",

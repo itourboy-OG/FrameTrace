@@ -5,6 +5,12 @@ namespace FrameTrace;
 
 public partial class App : Application
 {
+    public App()
+    {
+        DispatcherUnhandledException += (_, args) => Diagnostics.Write("unhandled-ui-error", args.Exception.ToString());
+        AppDomain.CurrentDomain.UnhandledException += (_, args) => Diagnostics.Write("unhandled-process-error", args.ExceptionObject.ToString() ?? throw new InvalidOperationException("An unhandled error had no description."));
+    }
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);

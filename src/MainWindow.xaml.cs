@@ -87,6 +87,10 @@ public partial class MainWindow : Window
     private bool upscalerScanSlow;
 
     private Task<ImmutableArray<SensorReading>>? sensorRead;
+    private Task<AmdServiceHealth>? amdServiceRead;
+    private AmdServiceHealth? amdServices;
+    private string amdHealthError = "";
+    private long nextAmdServiceCheck, lastTargetFrameAt;
 
     private ImmutableArray<SensorReading> renderedReadings;
 
@@ -237,6 +241,25 @@ public partial class MainWindow : Window
 
             }
 
+            if (amdServiceRead is { IsCompleted: true })
+            {
+                try { amdServices = await amdServiceRead; amdHealthError = ""; }
+                catch (Exception error) when (error is Win32Exception or InvalidOperationException or UnauthorizedAccessException)
+                {
+                    amdServices = null;
+                    amdHealthError = "AMD service status unavailable: " + error.Message;
+                    Diagnostics.Write("amd-service-status-unavailable", error.ToString());
+                    nextAmdServiceCheck = now + 30000;
+                }
+                amdServiceRead = null;
+            }
+
+            if (Pages.SelectedIndex == 0 && IsVisible && WindowState != WindowState.Minimized && amdServiceRead is null && now >= nextAmdServiceCheck)
+            {
+                nextAmdServiceCheck = now + 5000;
+                amdServiceRead = Task.Run(CaptureHealth.ReadAmdServices);
+            }
+
             if (hardware is not null && sensorRead is null && now >= nextSensors)
 
             {
@@ -250,7 +273,7 @@ public partial class MainWindow : Window
                 captureRestartRequested = false;
                 try { if (capture is not null) await capture.DisposeAsync(); }
                 catch (Exception error) { Report("Capture restart cleanup failed", error); }
-                capture = null; target = 0; retries = 0; nextCapture = now;
+                capture = null; target = 0; retries = 0; nextCapture = now; lastTargetFrameAt = 0;
                 summary = FrameMetrics.Summarize([], now); overlay?.Hide();
                 upscaler = UpscalerObservation.Unknown; upscalerProcess = 0;
                 GameName.Text = "Waiting for your game";
@@ -281,6 +304,7 @@ public partial class MainWindow : Window
                     {
                         target = Environment.ProcessId;
                         summary = capture.ReadSummary(target);
+                        if (summary.AppFps.HasValue) lastTargetFrameAt = now;
                         GameName.Text = "Frame Trace · Overlay test";
                         gameRuntime = "Test scene"; gameIcon = null; gameIconPid = 0; gameIconStatus = "";
                         CaptureState.Text = "Live test · Frame Trace presentation FPS, not a game benchmark";
@@ -307,9 +331,10 @@ public partial class MainWindow : Window
 
                     {
 
-                        if (target != candidate.ProcessId) Diagnostics.Write("target", JsonSerializer.Serialize(candidate));
+                        if (target != candidate.ProcessId) { Diagnostics.Write("target", JsonSerializer.Serialize(candidate)); lastTargetFrameAt = 0; }
 
                         target = candidate.ProcessId;
+                        lastTargetFrameAt = candidate.LastFrame;
 
                         if (foreground?.ProcessId == candidate.ProcessId) FollowGameDisplay(foreground.Monitor);
 
@@ -417,7 +442,7 @@ public partial class MainWindow : Window
 
                 }
 
-                capture = null; retries++; nextCapture = now + 2000 * retries;
+                capture = null; retries++; nextCapture = now + 2000 * retries; lastTargetFrameAt = 0;
 
                 summary = FrameMetrics.Summarize([], now); overlay?.Hide();
                 upscaler = UpscalerObservation.Unknown; upscalerProcess = 0;
@@ -452,7 +477,33 @@ public partial class MainWindow : Window
 
         if (!IsVisible || WindowState == WindowState.Minimized) return;
         OverlayButton.Content = enabled ? "Overlay on" : "Overlay off";
-        if (Pages.SelectedIndex == 2) return;
+        if (Pages.SelectedIndex >= 2) return;
+        if (Pages.SelectedIndex == 0)
+        {
+            long now = Environment.TickCount64;
+            bool recentFrames = target != 0 && lastTargetFrameAt > 0 && now - lastTargetFrameAt < 3000;
+            CaptureHealthText.Text = CaptureHealth.Frames(capture is not null, target, lastTargetFrameAt, now);
+            CaptureHealthText.Foreground = capture is null || target != 0 && lastTargetFrameAt > 0 && !recentFrames ? Brushes.LightSalmon : Brushes.LightGray;
+            if (amdHealthError.Length > 0)
+            {
+                AmdHealthText.Text = amdHealthError;
+                AmdHealthText.Foreground = Brushes.LightSalmon;
+                AmdHealthText.Visibility = Visibility.Visible;
+            }
+            else if (amdServices is { Installed: true } health)
+            {
+                AmdHealthText.Text = CaptureHealth.Amd(health, recentFrames, summary.Generation.Contains("AFMF", StringComparison.OrdinalIgnoreCase));
+                AmdHealthText.Foreground = health.Running ? Brushes.LightGray : Brushes.LightSalmon;
+                AmdHealthText.Visibility = Visibility.Visible;
+            }
+            else if (amdServices is { Installed: false } && readings.Any(reading => reading.HardwareType == "GpuAmd"))
+            {
+                AmdHealthText.Text = "AMD services not found · Check the Adrenalin installation.";
+                AmdHealthText.Foreground = Brushes.LightSalmon;
+                AmdHealthText.Visibility = Visibility.Visible;
+            }
+            else AmdHealthText.Visibility = Visibility.Collapsed;
+        }
         ImmutableArray<OverlaySectionData> data = OverlayData.Build(readings, summary);
         if (Pages.SelectedIndex == 1) {
             preview.UpdateGameInfo(GameName.Text, gameRuntime, gameIcon);
@@ -633,11 +684,12 @@ public partial class MainWindow : Window
         draft = draft with { Sections = Preferences.Initial.Sections }; LoadControls();
     }
 
-    private void PageChanged(object sender, SelectionChangedEventArgs e)
+    private async void PageChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!ready || e.Source != Pages) return;
         if (Pages.SelectedIndex == 1) LoadSection();
         RenderData();
+        if (Pages.SelectedIndex == 4 && !changelogRequested) await LoadChangelogAsync();
     }
 
     private void ToggleOverlay(object sender, RoutedEventArgs e) { enabled = !enabled; if (!enabled) overlay?.Hide(); OverlayButton.Content = enabled ? "Overlay on" : "Overlay off"; }
@@ -668,17 +720,36 @@ public partial class MainWindow : Window
 
     {
 
-        SaveFileDialog dialog = new() { Filter = "Diagnostics (*.json)|*.json", FileName = "FrameTrace-diagnostics.json" };
-
-        if (dialog.ShowDialog(this) != true) return;
-
-        try { WriteDiagnostics(dialog.FileName); Status.Text = "Diagnostics exported."; }
-
-        catch (Exception error) { Report("Diagnostics export failed", error); }
+        try
+        {
+            Directory.CreateDirectory(AppIdentity.SupportReportsDirectory);
+            SaveFileDialog dialog = new() { Filter = "Support log (*.zip)|*.zip", InitialDirectory = AppIdentity.SupportReportsDirectory,
+                FileName = AppIdentity.ProductName.Replace(" ", "", StringComparison.Ordinal) + $"-support-{DateTime.Now:yyyyMMdd-HHmmss}.zip" };
+            if (dialog.ShowDialog(this) != true) return;
+            WriteSupportReport(dialog.FileName);
+            Status.Text = "Support log saved: " + dialog.FileName;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
+        { Report("Support log export failed", error); }
 
     }
 
-    public void WriteDiagnostics(string path) => File.WriteAllText(path, JsonSerializer.Serialize(new { Version = typeof(App).Assembly.GetName().Version!.ToString(3), OverlayEnabled = enabled, Displays = Desktop.Displays().Select(d => new { d.Name, Width = d.Bounds.Width, Height = d.Bounds.Height, d.Scale }), Timestamp = Environment.TickCount64, ForegroundPid = Desktop.Foreground()?.ProcessId, TargetProcess = target, ManualTarget = selectedTarget, LastError = lastError, Sensors = readings, Frames = summary, Candidates = capture?.Candidates(), RecentFrames = capture?.RecentFrames(target), CaptureMessages = capture?.Messages, CaptureActivity = capture?.Activity, TraceSessions = CaptureSessions.Names(), CpuStatus = HardwareMonitor.CpuSensorStatus }, new JsonSerializerOptions { WriteIndented = true }));
+    private void OpenSupportFolder(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Directory.CreateDirectory(AppIdentity.SupportReportsDirectory);
+            Process.Start(new ProcessStartInfo(AppIdentity.SupportReportsDirectory) { UseShellExecute = true });
+        }
+        catch (Exception error) when (error is Win32Exception or IOException or UnauthorizedAccessException)
+        { Report("Support folder could not open", error); }
+    }
+
+    public void WriteDiagnostics(string path) => File.WriteAllText(path, DiagnosticsJson());
+
+    internal void WriteSupportReport(string path) => Diagnostics.ExportSupportReport(path, DiagnosticsJson());
+
+    private string DiagnosticsJson() => JsonSerializer.Serialize(new { Version = typeof(App).Assembly.GetName().Version!.ToString(3), OverlayEnabled = enabled, Displays = Desktop.Displays().Select(d => new { d.Name, Width = d.Bounds.Width, Height = d.Bounds.Height, d.Scale }), Timestamp = Environment.TickCount64, ForegroundPid = Desktop.Foreground()?.ProcessId, TargetProcess = target, LastTargetFrameAt = lastTargetFrameAt, ManualTarget = selectedTarget, LastError = lastError, Sensors = readings, Frames = summary, AmdServices = amdServices, AmdHealthError = amdHealthError, Candidates = capture?.Candidates(), RecentFrames = capture?.RecentFrames(target), CaptureMessages = capture?.Messages, CaptureActivity = capture?.Activity, TraceSessions = CaptureSessions.Names(), CpuStatus = HardwareMonitor.CpuSensorStatus }, new JsonSerializerOptions { WriteIndented = true });
 
     private void Report(string operation, Exception error)
 
@@ -696,7 +767,7 @@ public partial class MainWindow : Window
 
         e.Cancel = true; if (closing) return; closing = true; shutdown.Cancel();
 
-        try { await WaitForUpdateDownloadAsync(); await monitoring; if (sensorRead is not null) await sensorRead; if (capture is not null) await capture.DisposeAsync(); }
+        try { await WaitForUpdateDownloadAsync(); await monitoring; if (sensorRead is not null) await sensorRead; if (amdServiceRead is not null) await amdServiceRead; if (capture is not null) await capture.DisposeAsync(); }
 
         catch (Exception error) { Report("Capture shutdown failed", error); }
 

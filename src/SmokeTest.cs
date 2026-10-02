@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -530,6 +531,12 @@ public static class SmokeTest
             Require(window.Height <= SystemParameters.WorkArea.Height, "The startup window extends beyond the screen's usable height.");
             if (SystemParameters.WorkArea.Height >= 1120)
                 Require(dashboard.ScrollableHeight < 1, $"The startup dashboard still clips its hardware cards: overflow={dashboard.ScrollableHeight:0.##}.");
+            TextBlock captureHealth = (TextBlock)window.FindName("CaptureHealthText");
+            Require(AutomationProperties.GetAutomationId(captureHealth) == "CaptureHealth" && captureHealth.Text.StartsWith("Capture health · ") && !captureHealth.Text.Contains("Checking capture"), "The dashboard did not show current capture health.");
+            AmdServiceHealth amdHealth = CaptureHealth.ReadAmdServices();
+            TextBlock amdHealthText = (TextBlock)window.FindName("AmdHealthText");
+            if (amdHealth.Installed)
+                Require(AutomationProperties.GetAutomationId(amdHealthText) == "AmdHealth" && amdHealthText.IsVisible && amdHealthText.Text.StartsWith("AMD services "), "The dashboard did not show the installed AMD services' status.");
             SaveImage(window, Path.Combine(outputDirectory, "dashboard.png"));
             ((TabControl)window.FindName("Pages")).SelectedIndex = 1;
             await Task.Delay(400);
@@ -692,10 +699,22 @@ public static class SmokeTest
             settingsPage.ScrollToVerticalOffset(settingsPage.ScrollableHeight);
             await Task.Delay(150);
             Require(FindButton(window, "ReportProblemButton").IsVisible && FindButton(window, "SendFeedbackButton").IsVisible, "The feedback actions are missing from Settings.");
+            Require(FindButton(window, "ExportSupportButton").IsVisible && FindButton(window, "OpenSupportFolderButton").IsVisible, "Support log actions are missing from Settings.");
             SaveImage(window, Path.Combine(outputDirectory, "settings-bottom.png"));
             ((TabControl)window.FindName("Pages")).SelectedIndex = 3;
             await Task.Delay(150);
             SaveImage(window, Path.Combine(outputDirectory, "about.png"));
+            Require(Path.IsPathFullyQualified(AppIdentity.SupportReportsDirectory), "Windows Documents did not resolve to an absolute support-report folder.");
+            Diagnostics.Write("support-report-smoke", "Local support report check");
+            string reportPath = Path.Combine(outputDirectory, "support-report.zip");
+            window.WriteSupportReport(reportPath);
+            using (ZipArchive support = ZipFile.OpenRead(reportPath))
+            {
+                using JsonDocument state = JsonDocument.Parse(support.GetEntry("state.json")?.Open() ?? throw new InvalidDataException("Support report omitted state.json."));
+                Require(state.RootElement.GetProperty("Version").GetString() == typeof(App).Assembly.GetName().Version!.ToString(3), "Support report omitted the app version.");
+                using StreamReader events = new(support.GetEntry("events.jsonl")?.Open() ?? throw new InvalidDataException("Support report omitted events.jsonl."));
+                Require(events.ReadToEnd().Contains("support-report-smoke", StringComparison.Ordinal), "Support report omitted recent logged events.");
+            }
             Preferences.Write(Preferences.Initial, Path.Combine(outputDirectory, "layout.json"));
             Require(Preferences.Parse(File.ReadAllText(Path.Combine(outputDirectory, "layout.json"))).Sections.Length == 4, "Layout round trip failed.");
             await CloseAsync(window); window = null;
@@ -747,6 +766,16 @@ public static class SmokeTest
             using CancellationTokenSource timeout = new(TimeSpan.FromMinutes(3));
             UpdateCheckResult result = await UpdateChecker.CheckAsync(new Version(0, 0, 0), timeout.Token);
             Require(result.Availability == UpdateAvailability.Available && result.Installer is not null, "The real GitHub release has no verified installer.");
+            ImmutableArray<ChangelogRelease> releases = await UpdateChecker.ReadChangelogAsync(timeout.Token);
+            Require(!releases.IsEmpty && releases.All(release => release.Notes.Length > 0 && release.Url.Host == "github.com"), "Published release notes were not loaded for the changelog.");
+            window.Pages.SelectedItem = window.Pages.Items.Cast<TabItem>().Single(tab => AutomationProperties.GetAutomationId(tab) == "ChangelogTab");
+            ItemsControl changelog = (ItemsControl)window.FindName("ChangelogItems");
+            TextBlock changelogStatus = (TextBlock)window.FindName("ChangelogStatus");
+            for (int attempt = 0; attempt < 100 && changelog.Items.Count == 0 && changelogStatus.Text.StartsWith("Loading", StringComparison.Ordinal); attempt++)
+                await Task.Delay(100);
+            Require(changelog.Items.Count > 0 && changelogStatus.Text.StartsWith("Showing", StringComparison.Ordinal), "The Changelog tab did not display recent releases.");
+            SaveImage(window, Path.Combine(outputDirectory, "changelog.png"));
+            window.Pages.SelectedIndex = 0;
             window.ShowAvailableUpdate(result);
             await window.Dispatcher.InvokeAsync(() => window.UpdateLayout(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             Border banner = (Border)window.FindName("UpdateBanner");
@@ -795,7 +824,7 @@ public static class SmokeTest
             catch (OperationCanceledException) { }
             Require(FindButton(window, "CheckForUpdatesButton").IsEnabled && FindButton(window, "InstallUpdateButton").IsEnabled, "Update controls were not restored after cancellation.");
             Require((await UpdateChecker.CheckAsync(typeof(App).Assembly.GetName().Version!, timeout.Token)).Availability == UpdateAvailability.UpToDate, "The current app version was offered an older release.");
-            File.WriteAllText(Path.Combine(outputDirectory, "result.txt"), "PASS: real GitHub release and installer download, compact banner, Not now dismissal without downloading, percentage progress, SHA-256 verification, rejection of a modified installer, cancellation during streaming with partial-file cleanup, restored controls, and no downgrade offered. The installer was not executed.");
+            File.WriteAllText(Path.Combine(outputDirectory, "result.txt"), "PASS: in-app changelog with live GitHub release notes, real release and installer download, compact banner, Not now dismissal without downloading, percentage progress, SHA-256 verification, rejection of a modified installer, cancellation during streaming with partial-file cleanup, restored controls, and no downgrade offered. The installer was not executed.");
         }
         catch (Exception error)
         {

@@ -5,13 +5,13 @@ labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: "Please do not include passwords, account details, or other private information. Diagnostics are optional; review them before attaching."
+      value: "Please do not include passwords, account details, or other private information. Settings → Save support log creates an optional ZIP in Documents\\Frame Trace Logs; review it before attaching."
   - type: input
     id: app-version
     attributes:
       label: Frame Trace version
       description: The version shown in the app window.
-      placeholder: "0.8.20"
+      placeholder: "0.8.22"
     validations:
       required: true
   - type: textarea

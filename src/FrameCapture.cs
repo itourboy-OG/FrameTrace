@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Globalization;
 
 using System.IO;
+using System.IO.Compression;
 
 using System.Text.Json;
 
@@ -48,6 +49,30 @@ public static class Diagnostics
 
         }
 
+    }
+
+    public static void ExportSupportReport(string path, string state)
+    {
+        string partial = path + ".partial-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            using (FileStream output = new(partial, FileMode.CreateNew, FileAccess.Write))
+            using (ZipArchive archive = new(output, ZipArchiveMode.Create))
+            {
+                using (StreamWriter writer = new(archive.CreateEntry("state.json").Open())) writer.Write(state);
+                lock (Gate)
+                {
+                    if (File.Exists(PathName)) archive.CreateEntryFromFile(PathName, "events.jsonl");
+                    if (File.Exists(PathName + ".previous")) archive.CreateEntryFromFile(PathName + ".previous", "events-previous.jsonl");
+                }
+            }
+            File.Move(partial, path, true);
+        }
+        catch
+        {
+            if (File.Exists(partial)) File.Delete(partial);
+            throw;
+        }
     }
 
 }

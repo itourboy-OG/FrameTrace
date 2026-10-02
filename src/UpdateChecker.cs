@@ -6,6 +6,8 @@ using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Security.Cryptography;
+using System.Collections.Immutable;
+using System.Text.RegularExpressions;
 
 namespace FrameTrace;
 
@@ -13,11 +15,58 @@ internal enum UpdateAvailability { UpToDate, Available, NoRelease }
 
 internal sealed record UpdateInstaller(string Name, Uri DownloadUri, long Size, string Sha256);
 internal sealed record UpdateCheckResult(UpdateAvailability Availability, Version? LatestVersion, Uri? ReleaseUri, UpdateInstaller? Installer);
+internal sealed record ChangelogRelease(string Version, string Title, string Date, string Notes, Uri Url);
 
 internal static class UpdateChecker
 {
     private const string Repository = "itourboy-OG/FrameTrace";
     private static readonly Uri LatestRelease = new($"https://api.github.com/repos/{Repository}/releases/latest");
+    private static readonly Uri RecentReleases = new($"https://api.github.com/repos/{Repository}/releases?per_page=20");
+
+    internal static async Task<ImmutableArray<ChangelogRelease>> ReadChangelogAsync(CancellationToken cancellationToken)
+    {
+        using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(8) };
+        client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("FrameTrace", typeof(App).Assembly.GetName().Version!.ToString(3)));
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        for (int attempt = 1; ; attempt++)
+        {
+            try { return await ReadChangelogResponseAsync(client, cancellationToken); }
+            catch (HttpRequestException error) when (attempt < 3 && IsTransientHttpError(error))
+            {
+                Diagnostics.Write("changelog-retry", JsonSerializer.Serialize(new { Attempt = attempt, Error = error.Message }));
+                await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken);
+            }
+            catch (TaskCanceledException error) when (attempt < 3 && !cancellationToken.IsCancellationRequested)
+            {
+                Diagnostics.Write("changelog-retry", JsonSerializer.Serialize(new { Attempt = attempt, Error = error.Message }));
+                await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken);
+            }
+        }
+    }
+
+    private static async Task<ImmutableArray<ChangelogRelease>> ReadChangelogResponseAsync(HttpClient client, CancellationToken cancellationToken)
+    {
+        using HttpResponseMessage response = await client.GetAsync(RecentReleases, cancellationToken);
+        string body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException($"GET {RecentReleases} failed with HTTP {(int)response.StatusCode}. Response: {body}", null, response.StatusCode);
+        GitHubChangelogRelease[] releases;
+        try { releases = JsonSerializer.Deserialize<GitHubChangelogRelease[]>(body) ?? throw new JsonException("GitHub returned an empty release list."); }
+        catch (JsonException error) { throw new JsonException($"GitHub release list could not be read. Response: {body}", error); }
+        return releases.Where(release => !release.Draft && !release.Prerelease)
+            .OrderByDescending(release => release.PublishedAt).Take(10)
+            .Select(release =>
+            {
+                if (string.IsNullOrWhiteSpace(release.TagName) || string.IsNullOrWhiteSpace(release.Name) || string.IsNullOrWhiteSpace(release.Body)
+                    || !Uri.TryCreate(release.HtmlUrl, UriKind.Absolute, out Uri? url)
+                    || url.Scheme != Uri.UriSchemeHttps || !url.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+                    || !url.AbsolutePath.StartsWith($"/{Repository}/releases/tag/", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException($"GitHub release {release.TagName} has a missing title, notes, or valid release URL.");
+                string notes = Regex.Replace(release.Body, @"\[([^\]]+)\]\([^)]+\)", "$1");
+                notes = Regex.Replace(notes, @"(?m)^#{1,6}\s*", "").Replace("**", "").Replace("`", "").Trim();
+                return new ChangelogRelease(release.TagName, release.Name, release.PublishedAt.ToLocalTime().ToString("MMM d, yyyy"), notes, url);
+            }).ToImmutableArray();
+    }
 
     internal static async Task<UpdateCheckResult> CheckAsync(Version currentVersion, CancellationToken cancellationToken)
     {
@@ -147,4 +196,13 @@ internal static class UpdateChecker
         [property: JsonPropertyName("size"), JsonRequired] long Size,
         [property: JsonPropertyName("state"), JsonRequired] string State,
         [property: JsonPropertyName("digest"), JsonRequired] string? Digest);
+
+    private sealed record GitHubChangelogRelease(
+        [property: JsonPropertyName("tag_name"), JsonRequired] string TagName,
+        [property: JsonPropertyName("name"), JsonRequired] string Name,
+        [property: JsonPropertyName("body"), JsonRequired] string Body,
+        [property: JsonPropertyName("published_at"), JsonRequired] DateTimeOffset PublishedAt,
+        [property: JsonPropertyName("html_url"), JsonRequired] string HtmlUrl,
+        [property: JsonPropertyName("draft"), JsonRequired] bool Draft,
+        [property: JsonPropertyName("prerelease"), JsonRequired] bool Prerelease);
 }
