@@ -56,6 +56,7 @@ public sealed record SectionStyle(SectionKind Kind, string Name, string NameColo
 
     public double GraphHeight { get; init; } = 90;
     public bool ThemeCard { get; init; }
+    public bool ThemeRail { get; init; }
     public bool UsageGauge { get; init; }
     public bool UsageBar { get; init; }
     public double UsageBarWidth { get; init; } = 220;
@@ -118,7 +119,7 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
 
     {
 
-        SectionKind.Frames => ["app", "display", "average", "low", "frametime", "generation", "upscaler"],
+        SectionKind.Frames => ["app", "display", "average", "low", "frametime", "generation", "upscaler", "dlss_sr_override", "dlss_fg_override", "dlss_rr_override"],
 
         SectionKind.Gpu => ["usage", "temperature", "power", "clock", "vram"],
 
@@ -169,7 +170,10 @@ public sealed record Preferences(int SchemaVersion, string Accent, double Opacit
             throw new InvalidDataException("Ignored applications must be executable filenames, one per line.");
 
         if (value.GameTechnologyChoices.IsDefault || value.GameTechnologyChoices.Length > 256 ||
-            value.GameTechnologyChoices.Any(item => item is null || string.IsNullOrWhiteSpace(item.Application) || item.Application.Length > 260 || item.Application != Path.GetFileName(item.Application) || !item.Application.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || !item.Fsr411 && !item.Fsr4FrameGeneration) ||
+            value.GameTechnologyChoices.Any(item => item is null || string.IsNullOrWhiteSpace(item.Application) || item.Application.Length > 260 || item.Application != Path.GetFileName(item.Application) || !item.Application.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                || string.IsNullOrWhiteSpace(item.UpscalerLabel) || item.UpscalerLabel.Length > 60 || item.UpscalerLabel.Any(char.IsControl)
+                || string.IsNullOrWhiteSpace(item.FrameGenerationLabel) || item.FrameGenerationLabel.Length > 60 || item.FrameGenerationLabel.Any(char.IsControl)
+                || !item.Fsr411 && !item.Fsr4FrameGeneration && item.UpscalerLabel == "FSR 4.1.1" && item.FrameGenerationLabel == "FSR 4 FG") ||
             value.GameTechnologyChoices.Select(item => item.Application).Distinct(StringComparer.OrdinalIgnoreCase).Count() != value.GameTechnologyChoices.Length)
             throw new InvalidDataException("Game technology confirmations must name unique executable files with at least one confirmed option.");
 

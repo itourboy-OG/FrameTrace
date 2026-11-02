@@ -408,7 +408,7 @@ public partial class MainWindow
         MetricOptions.Children.Clear(); metricChecks.Clear();
         if (section.Kind == SectionKind.Frames)
         {
-            MetricOptions.Children.Add(new TextBlock { Text = "Cyberpunk shows saved upscaler and frame-generation choices. Other games may show loaded AMD FSR or Intel XeSS libraries; that does not prove the active mode.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 0, 0, 8) });
+            MetricOptions.Children.Add(new TextBlock { Text = "Cyberpunk shows saved upscaler and frame-generation choices. Other games may show loaded AMD FSR, Intel XeSS, or NVIDIA DLSS libraries; that does not prove the active mode.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightSlateGray, Margin = new Thickness(0, 0, 0, 8) });
             Border confirmations = new() { Background = new SolidColorBrush(Color.FromRgb(27, 39, 50)), BorderBrush = new SolidColorBrush(Color.FromRgb(53, 71, 86)), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(8), Margin = new Thickness(0, 0, 0, 10) };
             StackPanel content = new(); confirmations.Child = content;
             string[] games = RunningEditorGames();
@@ -425,14 +425,31 @@ public partial class MainWindow
             content.Children.Add(gamePicker);
             if (games.Length == 0) content.Children.Add(new TextBlock { Text = "Open a game, then return to Overlay Studio to choose it.", Foreground = Brushes.LightSlateGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
             GameTechnologyChoice? choice = draft.GameTechnologyChoices.FirstOrDefault(item => item.Application.Equals(activeApplication, StringComparison.OrdinalIgnoreCase));
-            CheckBox confirmedFsr411 = new() { Content = "My game uses FSR 4.1.1 upscaling", IsChecked = choice?.Fsr411 == true, IsEnabled = activeApplication.Length != 0, ToolTip = "Your per-game confirmation, not automatic detection. Changes the displayed FSR version; keeps the detected quality preset when available." };
-            CheckBox confirmedFsr4Fg = new() { Content = "My game uses FSR 4 frame generation", IsChecked = choice?.Fsr4FrameGeneration == true, IsEnabled = activeApplication.Length != 0, ToolTip = "Your per-game confirmation, not automatic detection. Shows FSR 4 FG; keeps Cyberpunk's saved On/Off state when available." };
+            CheckBox confirmedFsr411 = new() { IsChecked = choice?.Fsr411 == true, IsEnabled = activeApplication.Length != 0, ToolTip = "Your per-game confirmation, not automatic detection. Keeps the detected quality preset when available." };
+            CheckBox confirmedFsr4Fg = new() { IsChecked = choice?.Fsr4FrameGeneration == true, IsEnabled = activeApplication.Length != 0, ToolTip = "Your per-game confirmation, not automatic detection. Keeps Cyberpunk's saved On/Off state when available." };
+            TextBox upscalerName = new() { Text = choice?.UpscalerLabel ?? "FSR 4.1.1", MaxLength = 60, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 6), ToolTip = "Name shown for this game's upscaler. Leave blank to restore FSR 4.1.1." };
+            TextBox frameGenerationName = new() { Text = choice?.FrameGenerationLabel ?? "FSR 4 FG", MaxLength = 60, Visibility = Visibility.Collapsed, ToolTip = "Name shown for this game's frame generation. Leave blank to restore FSR 4 FG." };
+            confirmedFsr411.Content = new TextBlock { Text = "Confirm upscaler: " + upscalerName.Text, TextWrapping = TextWrapping.Wrap };
+            confirmedFsr4Fg.Content = new TextBlock { Text = "Confirm frame generation: " + frameGenerationName.Text, TextWrapping = TextWrapping.Wrap };
             AutomationProperties.SetAutomationId(confirmedFsr411, "ConfirmFsr411");
             AutomationProperties.SetAutomationId(confirmedFsr4Fg, "ConfirmFsr4Fg");
-            confirmedFsr411.Click += (_, _) => EditGameTechnologyChoice(confirmedFsr411, confirmedFsr4Fg);
-            confirmedFsr4Fg.Click += (_, _) => EditGameTechnologyChoice(confirmedFsr411, confirmedFsr4Fg);
-            content.Children.Add(confirmedFsr411); content.Children.Add(confirmedFsr4Fg);
-            content.Children.Add(new TextBlock { Text = "These are your choices for this game, not verified runtime readings. Save & apply to use them in the overlay.", Foreground = Brushes.LightSlateGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5, 0, 0) });
+            AutomationProperties.SetAutomationId(upscalerName, "UpscalerConfirmationLabel");
+            AutomationProperties.SetAutomationId(frameGenerationName, "FrameGenerationConfirmationLabel");
+            Button editUpscaler = new() { Content = "Edit", IsEnabled = activeApplication.Length != 0, Margin = new Thickness(6, 0, 0, 5), ToolTip = "Edit the upscaler name for this game." };
+            Button editFrameGeneration = new() { Content = "Edit", IsEnabled = activeApplication.Length != 0, Margin = new Thickness(6, 0, 0, 0), ToolTip = "Edit the frame-generation name for this game." };
+            AutomationProperties.SetAutomationId(editUpscaler, "EditUpscalerConfirmation");
+            AutomationProperties.SetAutomationId(editFrameGeneration, "EditFrameGenerationConfirmation");
+            editUpscaler.Click += (_, _) => { bool show = upscalerName.Visibility != Visibility.Visible; upscalerName.Visibility = show ? Visibility.Visible : Visibility.Collapsed; editUpscaler.Content = show ? "Done" : "Edit"; if (show) { upscalerName.Focus(); upscalerName.SelectAll(); } };
+            editFrameGeneration.Click += (_, _) => { bool show = frameGenerationName.Visibility != Visibility.Visible; frameGenerationName.Visibility = show ? Visibility.Visible : Visibility.Collapsed; editFrameGeneration.Content = show ? "Done" : "Edit"; if (show) { frameGenerationName.Focus(); frameGenerationName.SelectAll(); } };
+            confirmedFsr411.Click += (_, _) => EditGameTechnologyChoice(confirmedFsr411, confirmedFsr4Fg, upscalerName, frameGenerationName);
+            confirmedFsr4Fg.Click += (_, _) => EditGameTechnologyChoice(confirmedFsr411, confirmedFsr4Fg, upscalerName, frameGenerationName);
+            upscalerName.TextChanged += (_, _) => EditGameTechnologyChoice(confirmedFsr411, confirmedFsr4Fg, upscalerName, frameGenerationName);
+            frameGenerationName.TextChanged += (_, _) => EditGameTechnologyChoice(confirmedFsr411, confirmedFsr4Fg, upscalerName, frameGenerationName);
+            DockPanel upscalerRow = new(); DockPanel.SetDock(editUpscaler, Dock.Right); upscalerRow.Children.Add(editUpscaler); upscalerRow.Children.Add(confirmedFsr411);
+            DockPanel frameGenerationRow = new(); DockPanel.SetDock(editFrameGeneration, Dock.Right); frameGenerationRow.Children.Add(editFrameGeneration); frameGenerationRow.Children.Add(confirmedFsr4Fg);
+            content.Children.Add(upscalerRow); content.Children.Add(upscalerName);
+            content.Children.Add(frameGenerationRow); content.Children.Add(frameGenerationName);
+            content.Children.Add(new TextBlock { Text = "These are your labels and choices for this game, not verified runtime readings. Save & apply to show them in the overlay.", Foreground = Brushes.LightSlateGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5, 0, 0) });
             MetricOptions.Children.Add(confirmations);
         }
         if (section.Kind == SectionKind.Game)
@@ -511,10 +528,16 @@ public partial class MainWindow
         };
         fanStatus.Foreground = rpm is > 0 ? new SolidColorBrush(Color.FromRgb(131, 239, 205)) : Brushes.LightSlateGray;
     }
-    private void EditGameTechnologyChoice(CheckBox confirmedFsr411, CheckBox confirmedFsr4Fg)
+    private void EditGameTechnologyChoice(CheckBox confirmedFsr411, CheckBox confirmedFsr4Fg, TextBox upscalerName, TextBox frameGenerationName)
     {
         if (!ready || loading || activeApplication.Length == 0) return;
-        GameTechnologyChoice choice = new(activeApplication, confirmedFsr411.IsChecked == true, confirmedFsr4Fg.IsChecked == true);
+        GameTechnologyChoice choice = new(activeApplication, confirmedFsr411.IsChecked == true, confirmedFsr4Fg.IsChecked == true)
+        {
+            UpscalerLabel = string.IsNullOrWhiteSpace(upscalerName.Text) ? "FSR 4.1.1" : upscalerName.Text.Trim(),
+            FrameGenerationLabel = string.IsNullOrWhiteSpace(frameGenerationName.Text) ? "FSR 4 FG" : frameGenerationName.Text.Trim()
+        };
+        ((TextBlock)confirmedFsr411.Content).Text = "Confirm upscaler: " + choice.UpscalerLabel;
+        ((TextBlock)confirmedFsr4Fg.Content).Text = "Confirm frame generation: " + choice.FrameGenerationLabel;
         draft = draft with { GameTechnologyChoices = GameTechnologyChoices.Set(draft.GameTechnologyChoices, choice) };
         StudioSaveState.Text = "Unsaved game choices";
         StudioSaveState.Foreground = Brushes.LightSalmon;

@@ -16,13 +16,13 @@ internal static class GameUpscalerDetection
         string[] names = moduleNames.Select(name => Path.GetFileName(name) ?? throw new InvalidDataException("A game module has no filename.")).ToArray();
         bool amd = names.Any(IsUpscalerModule);
         bool intel = names.Any(name => name.Equals("libxess.dll", StringComparison.OrdinalIgnoreCase) || name.Equals("libxess_dx11.dll", StringComparison.OrdinalIgnoreCase));
-        return (amd, intel) switch
-        {
-            (true, true) => new("AMD FSR and Intel XeSS runtimes loaded · active mode unknown", true),
-            (true, false) => new("AMD FSR runtime loaded · active mode unknown", true),
-            (false, true) => new("Intel XeSS runtime loaded · active mode unknown", true),
-            _ => UpscalerObservation.Unknown
-        };
+        bool nvidia = names.Any(name => name.Equals("nvngx_dlss.dll", StringComparison.OrdinalIgnoreCase) || name.Equals("sl.dlss.dll", StringComparison.OrdinalIgnoreCase));
+        List<string> runtimes = [];
+        if (amd) runtimes.Add("AMD FSR");
+        if (intel) runtimes.Add("Intel XeSS");
+        if (nvidia) runtimes.Add("NVIDIA DLSS");
+        return runtimes.Count == 0 ? UpscalerObservation.Unknown
+            : new(string.Join(" and ", runtimes) + (runtimes.Count == 1 ? " runtime loaded" : " runtimes loaded") + " · active mode unknown", true);
     }
 
     private static bool IsUpscalerModule(string name) =>

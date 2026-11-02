@@ -24,7 +24,7 @@ internal static class CyberpunkUpscalerDetection
             string? frameGeneration = ReadOptionalStringOption(options, "FrameGeneration", settingsPath);
             string? enabledOption = frameGeneration switch { "FSR3" => "FSR3_FrameGeneration", "DLSS" => "DLSSFrameGen", "XESS" => "XESS_FrameGeneration", _ => null };
             bool? enabled = enabledOption is null ? null : ReadOptionalBoolOption(options, enabledOption, settingsPath);
-            string? frameGenerationSetting = enabled is null ? null : (frameGeneration == "FSR3" ? "FSR 3" : frameGeneration == "XESS" ? "XeSS" : frameGeneration) + " FG · " + (enabled.Value ? "On" : "Off");
+            string? frameGenerationSetting = enabled is null ? null : (frameGeneration == "FSR3" ? "FSR 3" : frameGeneration == "XESS" ? "XeSS" : frameGeneration) + " FG · " + (enabled.Value ? "On" : "Off") + (frameGeneration == "DLSS" ? " (saved setting)" : "");
             return new UpscalerObservation(label + (mode is null ? "" : " · " + mode), true) { Mode = mode, FrameGenerationSetting = frameGenerationSetting };
         }
     }

@@ -11,11 +11,13 @@ using Microsoft.VisualBasic.FileIO;
 namespace FrameTrace;
 
 public sealed record SensorReading(string Device, string HardwareType, string Name, string Kind, double? Value, string Unit);
-public sealed record FrameReading(long ReceivedAt, int ProcessId, string Application, string Runtime, string SwapChain, string FrameType, string PresentMode, double? FrameTime, double? DisplayedTime, double StartedAt);
+public sealed record FrameReading(long ReceivedAt, int ProcessId, string Application, string Runtime, string SwapChain, string FrameType, string PresentMode, double? FrameTime, double? DisplayedTime, double StartedAt, bool Instrumented);
 public sealed record FrameSummary(double? AppFps, double? DisplayFps, double? FrameTime, string Generation, string PresentMode, ImmutableArray<double> Times)
 {
     public UpscalerObservation Upscaler { get; init; } = UpscalerObservation.Unknown;
-    public double? AverageFps { get; init; }
+    public bool HasGeneratedFrameTags { get; init; }
+    public bool HasInstrumentedFrameTiming { get; init; }
+    public double? AverageFps { get; init; }
     public double? LowFps { get; init; }
     public int SampleCount { get; init; }
     public ImmutableArray<FramePoint> Points { get; init; } = [];
@@ -23,6 +25,7 @@ public sealed record FrameSummary(double? AppFps, double? DisplayFps, double? Fr
 public sealed record UpscalerObservation(string Label, bool HasEvidence)
 {
     public string? FrameGenerationSetting { get; init; }
+    internal NvidiaOverrides? NvidiaOverrides { get; init; }
     public string? Mode { get; init; }
     public static UpscalerObservation Unknown => new("Not identified", false);
 }

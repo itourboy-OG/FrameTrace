@@ -39,6 +39,20 @@ public static class OverlayData
 
 {
 
+    public static string FpsLabel(FrameSummary frames) => frames.Upscaler.FrameGenerationSetting is { } setting
+        && setting.Contains(" FG · On", StringComparison.Ordinal)
+        && !frames.HasGeneratedFrameTags && !frames.HasInstrumentedFrameTiming ? "Captured FPS" : "Game FPS";
+
+    public static string DisplayFpsLabel(FrameSummary frames)
+    {
+        if (!frames.HasGeneratedFrameTags && !(frames.HasInstrumentedFrameTiming && frames.Generation.Contains("DLSS FG", StringComparison.OrdinalIgnoreCase))) return "On-screen FPS";
+        if (frames.Generation.Contains("AFMF", StringComparison.OrdinalIgnoreCase)) return "AFMF 2.1 FPS";
+        if (frames.Generation.Contains("XeSS", StringComparison.OrdinalIgnoreCase)) return "XeSS FG FPS";
+        if (frames.Generation.Contains("DLSS", StringComparison.OrdinalIgnoreCase)) return "DLSS FG FPS";
+        if (frames.Generation.Contains("FSR", StringComparison.OrdinalIgnoreCase)) return "FSR FG FPS";
+        return "On-screen FPS";
+    }
+
     public static ImmutableArray<OverlaySectionData> Build(ImmutableArray<SensorReading> sensors, FrameSummary frames)
 
     {
@@ -53,7 +67,7 @@ public static class OverlayData
 
         SensorReading? cpuPower = sensors.FirstOrDefault(sensor => sensor.HardwareType == "Cpu" && sensor.Kind == "Power" && sensor.Name is "Package" or "CPU Package");
         OverlaySectionData gpuSection = new(SectionKind.Gpu, gpuName, [Usage(gpu, "Gpu", "GPU Core"), new("temperature", "Temperature", Readings.Sensor(gpu, "Gpu", "Temperature", "GPU Core")), new("power", "Power draw", Readings.Sensor(gpu, "Gpu", "Power", "GPU Package")), new("clock", "Clock speed", Readings.Sensor(gpu, "Gpu", "Clock", "GPU Core")), new("vram", "VRAM used", Readings.Memory(gpu, "GPU Memory Used"))]);
-        gpuSection = gpuSection with { FanRpm = Readings.Find(gpu, "Gpu", "Fan", "GPU Fan")?.Value, Temperature = Readings.Find(gpu, "Gpu", "Temperature", "GPU Core")?.Value };
+        gpuSection = gpuSection with { FanRpm = gpu.FirstOrDefault(sensor => sensor.Kind == "Fan" && sensor.Name.StartsWith("GPU Fan", StringComparison.Ordinal))?.Value, Temperature = Readings.Find(gpu, "Gpu", "Temperature", "GPU Core")?.Value };
         MetricValue ramUsed = new("used", "RAM used", Readings.Sensor(sensors, "Memory", "Data", "Memory Used"))
         {
             Percent = sensors.FirstOrDefault(sensor => sensor.Device == "Total Memory" && sensor.HardwareType == "Memory" && sensor.Kind == "Load" && sensor.Name == "Memory")?.Value
@@ -61,7 +75,10 @@ public static class OverlayData
 
         OverlaySectionData cpuSection = new(SectionKind.Cpu, cpuName, [Usage(sensors, "Cpu", "CPU Total"), new("temperature", "Temperature", Readings.Format(cpuTemperature?.Value, "°C")), new("power", "Power draw", Readings.Format(cpuPower?.Value, "W"))]);
         cpuSection = cpuSection with { Temperature = cpuTemperature?.Value };
-        return [new(SectionKind.Frames, "FRAMES", [new("app", "App FPS", frames.AppFps?.ToString("0") ?? "—"), new("display", "Display FPS", frames.DisplayFps?.ToString("0") ?? "—"), new("average", "Average FPS", frames.AverageFps?.ToString("0") ?? "—"), new("low", "1% low FPS", frames.LowFps?.ToString("0") ?? "—"), new("upscaler", "Upscaler", frames.Upscaler.Label) { Available = frames.Upscaler.HasEvidence }, new("frametime", "Frame time", Readings.Format(frames.FrameTime, "ms")), new("generation", "Frame generation", frames.Generation) { Available = frames.Generation != "Unavailable" }]),
+        return [new(SectionKind.Frames, "FRAMES", [new("app", FpsLabel(frames), frames.AppFps?.ToString("0") ?? "—"), new("display", DisplayFpsLabel(frames), frames.DisplayFps?.ToString("0") ?? "—"), new("average", "Average FPS", frames.AverageFps?.ToString("0") ?? "—"), new("low", "1% low FPS", frames.LowFps?.ToString("0") ?? "—"), new("upscaler", "Upscaler", frames.Upscaler.Label) { Available = frames.Upscaler.HasEvidence }, new("frametime", "Frame time", Readings.Format(frames.FrameTime, "ms")), new("generation", "Frame generation", frames.Generation) { Available = frames.Generation != "Unavailable" },
+            new("dlss_sr_override", "DLSS SR preset", frames.Upscaler.NvidiaOverrides?.SuperResolutionPreset ?? "Unavailable") { Available = frames.Upscaler.NvidiaOverrides?.SuperResolutionPreset is not null },
+            new("dlss_fg_override", "DLSS FG preset", frames.Upscaler.NvidiaOverrides?.FrameGenerationPreset ?? "Unavailable") { Available = frames.Upscaler.NvidiaOverrides?.FrameGenerationPreset is not null },
+            new("dlss_rr_override", "DLSS RR preset", frames.Upscaler.NvidiaOverrides?.RayReconstructionPreset ?? "Unavailable") { Available = frames.Upscaler.NvidiaOverrides?.RayReconstructionPreset is not null }]),
 
             gpuSection,
 
@@ -247,6 +264,13 @@ public sealed partial class OverlayCanvas : Canvas
                 panel.Padding = new Thickness(14);
                 byte alpha = (byte)(preferences.Opacity * 255);
                 panel.Background = new LinearGradientBrush(Color.FromArgb(alpha, 20, 30, 43), Color.FromArgb(alpha, 7, 12, 22), 90);
+            }
+            if (style.ThemeRail)
+            {
+                panel.Width = 380;
+                panel.Padding = new Thickness(14, 10, 14, 10);
+                panel.BorderBrush = new SolidColorBrush(Color.FromRgb(157, 222, 67));
+                panel.BorderThickness = new Thickness(3, 0, 0, 0);
             }
             StackPanel lines = new();
             if (style.Kind == SectionKind.Game)
@@ -760,6 +784,19 @@ public sealed partial class OverlayCanvas : Canvas
             }
             return preferences with { Sections = placed.ToImmutable() };
         }
+        if (name == "GeForce telemetry")
+        {
+            Apply(preferences);
+            double railY = 24;
+            ImmutableArray<SectionStyle>.Builder rail = ImmutableArray.CreateBuilder<SectionStyle>();
+            foreach (SectionStyle section in preferences.Sections)
+            {
+                Size size = panels[section.Key].DesiredSize;
+                rail.Add(OverlayData.Move(section, new Point(24, railY), new Size(Width, Height), size));
+                railY += size.Height;
+            }
+            return preferences with { Sections = rail.ToImmutable() };
+        }
         double y = 24, x = 24, rowHeight = 0;
         double leftWidth = Math.Max(panels[SectionKind.Gpu.ToString()].DesiredSize.Width, panels[SectionKind.Ram.ToString()].DesiredSize.Width);
         double topHeight = Math.Max(panels[SectionKind.Gpu.ToString()].DesiredSize.Height, panels[SectionKind.Cpu.ToString()].DesiredSize.Height);
@@ -786,19 +823,19 @@ public sealed partial class OverlayCanvas : Canvas
 public static class LayoutPresets
 {
     public sealed record Choice(string Name, bool IsNew);
-    public static ImmutableArray<Choice> Choices => Names.Select(name => new Choice(name, name is "Signal panels" or "Minimal quartet" or "Compact strip" or "Sensor tower")).ToImmutableArray();
+    public static ImmutableArray<Choice> Choices => Names.Select(name => new Choice(name, name == "GeForce telemetry")).ToImmutableArray();
     public static ImmutableArray<string> Names => ["Classic RTSS", "Hardware dossier", "Benchmark grid", "FPS spotlight", "Telemetry bar"
-        , "Signal panels", "Minimal quartet", "Compact strip", "Sensor tower"
+        , "Signal panels", "Minimal quartet", "Compact strip", "Sensor tower", "GeForce telemetry"
     ];
     public static Preferences Create(Preferences existing, string name)
     {
         if (!Names.Contains(name)) throw new ArgumentException("Unknown layout preset.", nameof(name));
-        ImmutableArray<SectionKind> order = name is "FPS spotlight" or "Signal panels" or "Minimal quartet" or "Compact strip" or "Sensor tower"
+        ImmutableArray<SectionKind> order = name is "FPS spotlight" or "Signal panels" or "Minimal quartet" or "Compact strip" or "Sensor tower" or "GeForce telemetry"
             ? [SectionKind.Frames, SectionKind.Gpu, SectionKind.Cpu, SectionKind.Ram]
             : [SectionKind.Gpu, SectionKind.Cpu, SectionKind.Ram, SectionKind.Frames];
         return existing with
         {
-            Opacity = name == "Compact strip" ? 0.68 : name is "Signal panels" or "Sensor tower" ? 0.86 : 0,
+            Opacity = name == "Compact strip" ? 0.68 : name is "Signal panels" or "Sensor tower" or "GeForce telemetry" ? 0.86 : 0,
             Font = name == "Classic RTSS" ? "Consolas" : "Segoe UI",
             Sections = order.Select(kind => Style(Preferences.Initial.Sections.Single(s => s.Kind == kind), name)).ToImmutableArray()
         };
@@ -807,6 +844,9 @@ public static class LayoutPresets
     {
         ImmutableArray<string> metrics = (preset, section.Kind) switch
         {
+            ("GeForce telemetry", SectionKind.Frames) => ["display", "app", "dlss_sr_override", "dlss_fg_override", "dlss_rr_override"],
+            ("GeForce telemetry", SectionKind.Gpu) => ["usage", "temperature", "power", "vram"],
+            ("GeForce telemetry", SectionKind.Cpu) => ["usage", "temperature"],
             ("Minimal quartet", SectionKind.Frames) => ["app", "low"],
             ("Minimal quartet", SectionKind.Gpu or SectionKind.Cpu) => ["usage", "temperature"],
             ("Compact strip", SectionKind.Frames) => ["app", "average", "low", "frametime"],
@@ -829,7 +869,12 @@ public static class LayoutPresets
             (_, SectionKind.Ram) => ["used"],
             _ => throw new ArgumentOutOfRangeException(nameof(section))
         };
-        string color = section.Kind switch
+        string color = preset == "GeForce telemetry" ? section.Kind switch
+        {
+            SectionKind.Frames or SectionKind.Gpu => "#9DDE43",
+            SectionKind.Cpu or SectionKind.Ram => "#B4C1CE",
+            _ => throw new ArgumentOutOfRangeException(nameof(section))
+        } : section.Kind switch
         {
             SectionKind.Frames => "#87F36C", SectionKind.Gpu => "#FFAA49",
             SectionKind.Cpu => "#69CDF6", SectionKind.Ram => "#DBB7FA",
@@ -839,26 +884,27 @@ public static class LayoutPresets
         {
             "Minimal quartet" when section.Kind == SectionKind.Frames => MetricLayout.Tiles,
             "Sensor tower" when section.Kind == SectionKind.Frames => MetricLayout.Tiles,
-            "Hardware dossier" or "Benchmark grid" or "Signal panels" => MetricLayout.Table,
+            "Hardware dossier" or "Benchmark grid" or "Signal panels" or "GeForce telemetry" => MetricLayout.Table,
             "Telemetry bar" => MetricLayout.Tiles,
             "FPS spotlight" when section.Kind == SectionKind.Frames => MetricLayout.Tiles,
             _ => MetricLayout.Flow
         };
         SectionStyle styled = section with
         {
-            Name = preset == "Hardware dossier" && section.Kind is SectionKind.Gpu or SectionKind.Cpu ? "" : section.Kind == SectionKind.Frames ? "PERFORMANCE" : section.Kind.ToString().ToUpperInvariant(),
+            Name = preset == "GeForce telemetry" ? section.Kind switch { SectionKind.Frames => "NVIDIA PERFORMANCE", SectionKind.Gpu or SectionKind.Cpu => "", _ => "RAM" }
+                : preset == "Hardware dossier" && section.Kind is SectionKind.Gpu or SectionKind.Cpu ? "" : section.Kind == SectionKind.Frames ? "PERFORMANCE" : section.Kind.ToString().ToUpperInvariant(),
             NameColor = color, ValueColor = layout == MetricLayout.Flow ? color : "#F4F6F8",
-            ValueSize = preset == "Compact strip" ? 14 : preset is "Telemetry bar" or "Minimal quartet" ? 22 : 18, NameSize = 16,
-            HeroSize = preset == "Signal panels" ? 34 : section.Kind == SectionKind.Frames ? preset switch { "FPS spotlight" => 64, "Minimal quartet" => 48, "Sensor tower" => 42, "Benchmark grid" => 36, _ => 0 } : 0,
+            ValueSize = preset == "Compact strip" ? 14 : preset is "Telemetry bar" or "Minimal quartet" ? 22 : 18, NameSize = preset == "GeForce telemetry" ? 14 : 16,
+            HeroSize = preset == "Signal panels" ? 34 : section.Kind == SectionKind.Frames ? preset switch { "FPS spotlight" => 64, "Minimal quartet" => 48, "Sensor tower" => 42, "Benchmark grid" => 36, "GeForce telemetry" => 40, _ => 0 } : 0,
             Visible = true, Padding = preset == "Compact strip" ? 4 : 2, TextShadow = true,
-            ShowName = preset is "Hardware dossier" or "Benchmark grid" or "Telemetry bar" or "Signal panels" or "Sensor tower",
+            ShowName = preset is "Hardware dossier" or "Benchmark grid" or "Telemetry bar" or "Signal panels" or "Sensor tower" or "GeForce telemetry",
             Horizontal = true, Layout = layout,
-            Graph = section.Kind == SectionKind.Frames && preset is "Benchmark grid" or "FPS spotlight" or "Signal panels",
-            GraphBelow = true, GraphWidth = preset is "FPS spotlight" or "Signal panels" ? 306 : 260, GraphHeight = 64,
+            Graph = section.Kind == SectionKind.Frames && preset is "Benchmark grid" or "FPS spotlight" or "Signal panels" or "GeForce telemetry",
+            GraphBelow = true, GraphWidth = preset is "FPS spotlight" or "Signal panels" or "GeForce telemetry" ? 306 : 260, GraphHeight = preset == "GeForce telemetry" ? 48 : 64,
             Metrics = metrics,
             Labels = metrics.ToImmutableDictionary(id => id, id => id switch
             {
-                "app" => "FPS", "average" => "AVG", "low" => "1% LOW", "frametime" => layout == MetricLayout.Flow ? "" : "FRAME TIME",
+                "app" => preset == "GeForce telemetry" ? "CAPTURE" : "FPS", "display" => "ON SCREEN", "dlss_sr_override" => "DLSS SR", "dlss_fg_override" => "DLSS FG", "dlss_rr_override" => "DLSS RR", "average" => "AVG", "low" => "1% LOW", "frametime" => layout == MetricLayout.Flow ? "" : "FRAME TIME",
                 "usage" => layout == MetricLayout.Flow ? section.Kind == SectionKind.Gpu ? "GPU" : "CPU" : "LOAD",
                 "temperature" => layout == MetricLayout.Flow ? "" : "TEMP", "power" => layout == MetricLayout.Flow ? "" : "POWER",
                 "clock" => layout == MetricLayout.Flow ? "" : "CLOCK", "vram" => "VRAM", "used" => layout == MetricLayout.Flow ? "RAM" : "USED",
@@ -866,6 +912,7 @@ public static class LayoutPresets
             })
         };
         if (preset == "Signal panels") styled = styled with { ThemeCard = true, TextShadow = false };
+        if (preset == "GeForce telemetry") styled = styled with { ThemeRail = true, TextShadow = false, UsageBar = section.Kind == SectionKind.Gpu, UsageBarWidth = 320 };
         if (preset == "Sensor tower") styled = styled with { ThemeCard = true, UsageGauge = section.Kind == SectionKind.Gpu, TextShadow = false };
         return styled;
     }

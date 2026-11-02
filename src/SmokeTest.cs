@@ -29,6 +29,14 @@ public static class SmokeTest
             GameTechnologyChoice choice = new("Cyberpunk2077.exe", true, true);
             UpscalerObservation confirmed = GameTechnologyChoices.Apply(cyberpunk, choice);
             Require(confirmed.Label == "FSR 4.1.1 · Performance" && confirmed.FrameGenerationSetting == "FSR 4 FG · Off", "Per-game FSR confirmation lost the quality preset or saved Off state.");
+            GameTechnologyChoice renamed = choice with { UpscalerLabel = "DLSS 4.5", FrameGenerationLabel = "DLSS FG" };
+            UpscalerObservation custom = GameTechnologyChoices.Apply(cyberpunk, renamed);
+            Require(custom.Label == "DLSS 4.5 · Performance" && custom.FrameGenerationSetting == "DLSS FG · Off", "Custom per-game technology names did not reach the displayed readings.");
+            Preferences customSaved = Preferences.Parse(JsonSerializer.Serialize(Preferences.Initial with { GameTechnologyChoices = [renamed] }));
+            Require(customSaved.GameTechnologyChoices.Single().UpscalerLabel == "DLSS 4.5" && customSaved.GameTechnologyChoices.Single().FrameGenerationLabel == "DLSS FG", "Custom technology names did not survive saving.");
+            Require(GameTechnologyChoices.Set([renamed], renamed with { Fsr411 = false, Fsr4FrameGeneration = false }).Length == 1, "Disabling custom labels erased their saved names.");
+            GameTechnologyChoice oldChoice = JsonSerializer.Deserialize<GameTechnologyChoice>("{\"Application\":\"Cyberpunk2077.exe\",\"Fsr411\":true,\"Fsr4FrameGeneration\":true}")!;
+            Require(oldChoice.UpscalerLabel == "FSR 4.1.1" && oldChoice.FrameGenerationLabel == "FSR 4 FG", "Existing game confirmations lost their default labels.");
             Preferences saved = Preferences.Parse(JsonSerializer.Serialize(Preferences.Initial with { GameTechnologyChoices = [choice] }));
             Require(saved.GameTechnologyChoices is [{ Application: "Cyberpunk2077.exe", Fsr411: true, Fsr4FrameGeneration: true }], "Per-game confirmations did not survive saving.");
             Require(Preferences.ForLayoutExport(saved).GameTechnologyChoices.IsEmpty && Preferences.ApplyImportedLayout(saved, Preferences.Initial).GameTechnologyChoices.Length == 1, "Layout sharing changed local game confirmations.");
@@ -38,10 +46,23 @@ public static class SmokeTest
                 """);
             UpscalerObservation intelGame = CyberpunkUpscalerDetection.Inspect(path);
             Require(intelGame.Label == "XeSS · Quality" && intelGame.FrameGenerationSetting == "XeSS FG · On", "Cyberpunk's saved XeSS choice was not read.");
+            File.WriteAllText(path, """
+                {"data":[{"group_name":"/graphics/presets","options":[{"name":"ResolutionScaling","value":"DLSS"},{"name":"DLSS","value":"Performance"},{"name":"FrameGeneration","value":"DLSS"},{"name":"DLSSFrameGen","value":true}]}]}
+                """);
+            UpscalerObservation nvidiaGame = CyberpunkUpscalerDetection.Inspect(path);
+            Require(nvidiaGame.Label == "DLSS · Performance" && nvidiaGame.FrameGenerationSetting == "DLSS FG · On (saved setting)", "Cyberpunk's saved DLSS choice was mistaken for active frame generation.");
             Require(GameUpscalerDetection.Identify(["libxess.dll"]).Label == "Intel XeSS runtime loaded · active mode unknown", "The Intel XeSS D3D12/Vulkan runtime was not identified.");
             Require(GameUpscalerDetection.Identify(["libxess_dx11.dll"]).HasEvidence, "The Intel XeSS D3D11 runtime was not identified.");
             Require(!GameUpscalerDetection.Identify(["libxess_fg.dll", "libxell.dll"]).HasEvidence, "XeSS frame generation or latency library was mistaken for upscaling.");
             Require(GameUpscalerDetection.Identify(["libxess.dll", "amd_fidelityfx_upscaler_dx12.dll"]).Label.Contains("and Intel XeSS", StringComparison.Ordinal), "Games with both runtimes were labeled as only one vendor.");
+            Require(GameUpscalerDetection.Identify(["nvngx_dlss.dll"]).Label == "NVIDIA DLSS runtime loaded · active mode unknown", "The NVIDIA DLSS upscaler runtime was not identified.");
+            Require(GameUpscalerDetection.Identify(["sl.dlss.dll"]).HasEvidence, "The NVIDIA Streamline DLSS upscaler plugin was not identified.");
+            Require(!GameUpscalerDetection.Identify(["nvngx_dlssg.dll", "nvngx_dlssd.dll", "sl.dlss_g.dll", "sl.dlss_d.dll"]).HasEvidence, "NVIDIA frame generation or ray reconstruction was mistaken for upscaling.");
+            Require(NvidiaOverrideDetection.Inspect(Environment.ProcessId)?.HasPreset != true, "Frame Trace was mistaken for a game with NVIDIA DLSS overrides.");
+            NvidiaOverrides srActive = NvidiaOverrideDetection.ReadPresets(0x61f, 0x3f, 0x23f, 12, 3);
+            Require(srActive.SuperResolutionPreset == "Preset L" && srActive.RayReconstructionPreset is null && srActive.FrameGenerationPreset == "Preset C", "An inactive Ray Reconstruction setting took Super Resolution's live preset.");
+            NvidiaOverrides rrActive = NvidiaOverrideDetection.ReadPresets(0x21f, 0x63f, 0x63f, 6, 3);
+            Require(rrActive.SuperResolutionPreset is null && rrActive.RayReconstructionPreset == "Preset F", "The active Ray Reconstruction preset was assigned to Super Resolution.");
         }
         finally { File.Delete(path); }
     }
@@ -307,13 +328,29 @@ public static class SmokeTest
         MainWindow? window = null;
         try
         {
-            string[] header = FrameMetrics.SplitCsv("Application,ProcessID,PresentRuntime,SwapChainAddress,FrameType,PresentMode,FrameTime,DisplayedTime,CPUStartQPCTime");
+            string[] header = FrameMetrics.SplitCsv("Application,ProcessID,PresentRuntime,SwapChainAddress,FrameType,PresentMode,FrameTime,DisplayedTime,CPUStartQPCTime,InstrumentedLatency");
             FrameMetrics.ValidateHeader(header);
-            FrameReading a = FrameMetrics.Parse(header, "\"game, test.exe\",123,DXGI,0x1,Application,Composed: Flip,10,5,100", 100);
+            FrameReading a = FrameMetrics.Parse(header, "\"game, test.exe\",123,DXGI,0x1,Application,Composed: Flip,10,5,100,NA", 100);
             FrameReading b = a with { ReceivedAt = 110 };
             FrameReading generated = a with { ReceivedAt = 115, FrameType = "AMD AFMF", FrameTime = null };
             FrameSummary result = FrameMetrics.Summarize([a, b, generated], 120);
             Require(result.AppFps == 100 && result.DisplayFps == 200 && result.Generation == "AFMF 2.1", "Frame calculation failed.");
+            FrameSummary nvidiaTagged = result with { Upscaler = UpscalerObservation.Unknown with { FrameGenerationSetting = "DLSS FG · On (saved setting)" } };
+            FrameSummary nvidiaUntagged = FrameMetrics.Summarize([a, b], 120) with { Upscaler = nvidiaTagged.Upscaler };
+            Require(OverlayData.FpsLabel(nvidiaTagged) == "Game FPS" && OverlayData.FpsLabel(nvidiaUntagged) == "Captured FPS", "FPS label did not distinguish tagged and untagged frame generation.");
+            Require(OverlayData.DisplayFpsLabel(result) == "AFMF 2.1 FPS" && OverlayData.DisplayFpsLabel(nvidiaUntagged) == "On-screen FPS", "Display FPS was labeled by an unverified frame-generation setting.");
+            ImmutableArray<FrameReading> nvidiaFrames = Enumerable.Range(0, 12).Select(index => a with { ReceivedAt = 100 + index, StartedAt = 100 + index * 5, FrameTime = 5, DisplayedTime = 5, Instrumented = index % 3 == 0 }).ToImmutableArray();
+            FrameSummary nvidiaMeasured = FrameMetrics.Summarize(nvidiaFrames, 120) with { Upscaler = nvidiaTagged.Upscaler, Generation = "DLSS FG · On" };
+            Require(nvidiaMeasured.HasInstrumentedFrameTiming && Math.Abs(nvidiaMeasured.AppFps!.Value - 1000d / 15) < 0.001 && nvidiaMeasured.DisplayFps == 200, "Instrumented game frames were not separated from DLSS output frames.");
+            Require(OverlayData.FpsLabel(nvidiaMeasured) == "Game FPS" && OverlayData.DisplayFpsLabel(nvidiaMeasured) == "DLSS FG FPS", "Measured NVIDIA FPS labels are incorrect.");
+            ImmutableArray<FrameReading> changingFrames = Enumerable.Range(0, 210).Select(index =>
+            {
+                double startedAt = index < 135 ? index * (1000d / 60) : 2250 + (index - 135) * 10;
+                return a with { ReceivedAt = (long)startedAt, StartedAt = startedAt, FrameTime = 10, DisplayedTime = 5, Instrumented = true };
+            }).SelectMany(frame => new[] { frame, frame with { StartedAt = frame.StartedAt + 3, Instrumented = false }, frame with { StartedAt = frame.StartedAt + 6, Instrumented = false } }).ToImmutableArray();
+            FrameSummary changingRate = FrameMetrics.Summarize(changingFrames, 2999);
+            Require(changingRate.HasInstrumentedFrameTiming && changingRate.AppFps is > 95 and < 105 && changingRate.AverageFps is < 80,
+                "Live game FPS did not follow recent measured frames while the longer average stayed stable.");
             Require(FrameMetrics.Summarize([a, b], 120).Generation == "Unavailable", "Application tags must not prove FG is off.");
             UpscalerObservation detected = GameUpscalerDetection.Identify(["amd_fidelityfx_loader_dx12.dll", "AMD_FIDELITYFX_UPSCALER_DX12.DLL"]);
             Require(detected.HasEvidence && detected.Label.Contains("runtime loaded", StringComparison.Ordinal), "Loaded AMD FSR runtime was not identified.");
@@ -366,6 +403,9 @@ public static class SmokeTest
                 realSensors = await Task.Run(hardware.Read);
                 Require(realSensors.Any(s => s.Value.HasValue), "No real hardware sensor values.");
                 File.WriteAllText(Path.Combine(outputDirectory, "sensors.json"), JsonSerializer.Serialize(realSensors));
+                SensorReading? nvidiaFan = realSensors.FirstOrDefault(sensor => sensor.HardwareType == "GpuNvidia" && sensor.Kind == "Fan" && sensor.Name.StartsWith("GPU Fan", StringComparison.Ordinal));
+                if (nvidiaFan is not null)
+                    Require(OverlayData.Build(realSensors, FrameMetrics.Summarize([], Environment.TickCount64)).Single(section => section.Kind == SectionKind.Gpu).FanRpm == nvidiaFan.Value, "The NVIDIA GPU fan reading did not reach the overlay.");
             }
             window = new MainWindow();
             Application.Current.MainWindow = window;
@@ -633,7 +673,10 @@ public static class SmokeTest
                     Require(bounds.All(rect => rect.Left >= 0 && rect.Top >= 0 && rect.Right <= width && rect.Bottom <= 1080), "Preset exceeds display: " + preset);
                     for (int i = 0; i < bounds.Length; i++)
                         for (int j = i + 1; j < bounds.Length; j++)
-                            Require(!bounds[i].IntersectsWith(bounds[j]), "Preset sections overlap: " + preset);
+                        {
+                            Rect intersection = Rect.Intersect(bounds[i], bounds[j]);
+                            Require(intersection.IsEmpty || intersection.Width < 0.01 || intersection.Height < 0.01, "Preset sections overlap: " + preset);
+                        }
                 }
                 if (preset == "Signal panels")
                 {
@@ -849,6 +892,7 @@ public static class SmokeTest
             FindButton(window, "ApplyPresetButton").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             CheckUsageBar(outputDirectory);
             CheckSignalPanels(outputDirectory);
+            CheckGeForcePreset(outputDirectory);
             await CheckLiveEditingAsync(window, outputDirectory);
             CheckThemeWidgetsEditor(window, outputDirectory);
             CheckMetricGrouping(window);
@@ -1076,6 +1120,49 @@ public static class SmokeTest
         canvas.Arrange(new Rect(0, 0, canvas.Width, canvas.Height));
         SavePresetImage(canvas, Path.Combine(outputDirectory, "Signal-panels-live-sample.png"));
     }
+    private static void CheckGeForcePreset(string outputDirectory)
+    {
+        Require(LayoutPresets.Choices.Single(choice => choice.Name == "GeForce telemetry").IsNew
+            && LayoutPresets.Choices.Where(choice => choice.Name != "GeForce telemetry").All(choice => !choice.IsNew), "Only the newly added GeForce preset should carry a New badge.");
+        OverlayCanvas canvas = new() { Width = 1920, Height = 1080 };
+        canvas.Apply(LayoutPresets.Create(Preferences.Initial, "GeForce telemetry"));
+        ImmutableArray<SensorReading> sensors =
+        [
+            new("NVIDIA GeForce RTX 5070 Ti", "GpuNvidia", "GPU Core", "Load", 91, "%"),
+            new("NVIDIA GeForce RTX 5070 Ti", "GpuNvidia", "GPU Core", "Temperature", 64, "°C"),
+            new("NVIDIA GeForce RTX 5070 Ti", "GpuNvidia", "GPU Package", "Power", 245, "W"),
+            new("NVIDIA GeForce RTX 5070 Ti", "GpuNvidia", "GPU Memory Used", "SmallData", 8192, "MB"),
+            new("Test CPU", "Cpu", "CPU Total", "Load", 48, "%"),
+            new("Test CPU", "Cpu", "Core (Tctl/Tdie)", "Temperature", 72, "°C"),
+            new("Total Memory", "Memory", "Memory Used", "Data", 17.2, "GB")
+        ];
+        FrameSummary frames = new(170, 170, 5.9, "DLSS FG · On (saved setting)", "", [])
+        {
+            Upscaler = new("DLSS · Quality", true) { FrameGenerationSetting = "DLSS FG · On (saved setting)", NvidiaOverrides = new("Preset L", "Preset C", "Preset F") }
+        };
+        canvas.UpdateData(OverlayData.Build(sensors, frames));
+        canvas.Measure(new Size(canvas.Width, canvas.Height));
+        canvas.Arrange(new Rect(0, 0, canvas.Width, canvas.Height));
+        canvas.Apply(canvas.ArrangePreset("GeForce telemetry"));
+        double graphEnd = Stopwatch.GetTimestamp() * 1000d / Stopwatch.Frequency - 2000;
+        canvas.UpdateGraph(Enumerable.Range(0, 50).Select(index => new FramePoint(graphEnd - 9800 + index * 200, 5.9 + Math.Sin(index * 0.45) * 1.2)).ToImmutableArray());
+        Rect[] cards = canvas.Children.OfType<Border>().Where(panel => panel.Visibility == Visibility.Visible)
+            .Select(panel => new Rect(Canvas.GetLeft(panel), Canvas.GetTop(panel), panel.DesiredSize.Width, panel.DesiredSize.Height)).ToArray();
+        Require(cards.Length == 4 && cards.All(card => card.Right <= canvas.Width && card.Bottom <= canvas.Height), "GeForce rail exceeds the display.");
+        Require(cards.All(card => Math.Abs(card.Left - cards[0].Left) < 0.01 && Math.Abs(card.Width - cards[0].Width) < 0.01)
+            && Enumerable.Range(1, cards.Length - 1).All(index => Math.Abs(cards[index].Top - cards[index - 1].Bottom) < 0.01), "GeForce sections are not one continuous vertical rail: " + string.Join("; ", cards.Select(card => $"{card.Left:0.#},{card.Top:0.#} {card.Width:0.#}x{card.Height:0.#}")));
+        Require(Descendants(canvas).OfType<TextBlock>().Any(text => text.Text == "NVIDIA GeForce RTX 5070 Ti")
+            && Descendants(canvas).OfType<TextBlock>().Any(text => text.Text == "Test CPU"), "GeForce rail did not show the detected GPU and CPU names.");
+        for (int i = 0; i < cards.Length; i++)
+            for (int j = i + 1; j < cards.Length; j++)
+            {
+                Rect intersection = Rect.Intersect(cards[i], cards[j]);
+                Require(intersection.IsEmpty || intersection.Width < 0.01 || intersection.Height < 0.01, "GeForce rail sections overlap.");
+            }
+        canvas.Measure(new Size(canvas.Width, canvas.Height));
+        canvas.Arrange(new Rect(0, 0, canvas.Width, canvas.Height));
+        SavePresetImage(canvas, Path.Combine(outputDirectory, "GeForce-telemetry.png"));
+    }
     private static void CheckUsageBar(string outputDirectory)
     {
         SectionStyle gpu = Preferences.Initial.Sections.Single(section => section.Kind == SectionKind.Gpu) with
@@ -1226,6 +1313,16 @@ public static class SmokeTest
         window.UpdateLayout();
         CheckBox[] confirmations = Descendants(window).OfType<CheckBox>().Where(item => AutomationProperties.GetAutomationId(item) is "ConfirmFsr411" or "ConfirmFsr4Fg").ToArray();
         Require(confirmations.Length == 2 && confirmations.All(item => item.IsEnabled), "A captured game's FSR confirmations were not enabled in Overlay Studio.");
+        Button editUpscaler = Descendants(window).OfType<Button>().Single(item => AutomationProperties.GetAutomationId(item) == "EditUpscalerConfirmation");
+        editUpscaler.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        TextBox upscalerName = Descendants(window).OfType<TextBox>().Single(item => AutomationProperties.GetAutomationId(item) == "UpscalerConfirmationLabel");
+        upscalerName.Text = "DLSS 4.5";
+        Require(upscalerName.Visibility == Visibility.Visible && ((TextBlock)confirmations.Single(item => AutomationProperties.GetAutomationId(item) == "ConfirmFsr411").Content).Text.Contains("DLSS 4.5", StringComparison.Ordinal), "The upscaler Edit button did not update its custom name.");
+        Button editFrameGeneration = Descendants(window).OfType<Button>().Single(item => AutomationProperties.GetAutomationId(item) == "EditFrameGenerationConfirmation");
+        editFrameGeneration.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        TextBox frameGenerationName = Descendants(window).OfType<TextBox>().Single(item => AutomationProperties.GetAutomationId(item) == "FrameGenerationConfirmationLabel");
+        frameGenerationName.Text = "DLSS FG";
+        Require(frameGenerationName.Visibility == Visibility.Visible && ((TextBlock)confirmations.Single(item => AutomationProperties.GetAutomationId(item) == "ConfirmFsr4Fg").Content).Text.Contains("DLSS FG", StringComparison.Ordinal), "The frame-generation Edit button did not update its custom name.");
         window.UpdateEditorGame(null);
         window.UpdateLayout();
         CheckBox[] afterFocusChange = Descendants(window).OfType<CheckBox>().Where(item => AutomationProperties.GetAutomationId(item) is "ConfirmFsr411" or "ConfirmFsr4Fg").ToArray();

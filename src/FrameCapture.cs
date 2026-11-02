@@ -105,7 +105,7 @@ public static class FrameMetrics
 
     {
 
-        foreach (string column in new[] { "Application", "ProcessID", "PresentRuntime", "SwapChainAddress", "FrameType", "PresentMode", "FrameTime", "DisplayedTime", "CPUStartQPCTime" })
+        foreach (string column in new[] { "Application", "ProcessID", "PresentRuntime", "SwapChainAddress", "FrameType", "PresentMode", "FrameTime", "DisplayedTime", "CPUStartQPCTime", "InstrumentedLatency" })
 
             if (header.Count(name => name == column) != 1) throw new InvalidDataException($"PresentMon CSV must contain exactly one '{column}' column. Actual: {string.Join(',', header)}");
 
@@ -127,7 +127,7 @@ public static class FrameMetrics
 
         if (!double.TryParse(Field("CPUStartQPCTime"), NumberStyles.Float, CultureInfo.InvariantCulture, out double started) || !double.IsFinite(started) || started < 0) throw new InvalidDataException("Invalid CPUStartQPCTime.");
 
-        return new FrameReading(now, pid, Field("Application"), Field("PresentRuntime"), Field("SwapChainAddress"), Field("FrameType"), Field("PresentMode"), Duration(Field("FrameTime")), Duration(Field("DisplayedTime")), started);
+        return new FrameReading(now, pid, Field("Application"), Field("PresentRuntime"), Field("SwapChainAddress"), Field("FrameType"), Field("PresentMode"), Duration(Field("FrameTime")), Duration(Field("DisplayedTime")), started, Duration(Field("InstrumentedLatency")).HasValue);
 
     }
 
@@ -159,16 +159,22 @@ public static class FrameMetrics
 
         FrameReading[] active = recent.GroupBy(frame => frame.SwapChain)
             .MaxBy(group => (group.Count(frame => now - frame.ReceivedAt < 1500), group.Max(frame => frame.ReceivedAt)))?.ToArray() ?? [];
+        double latestStart = active.Length > 0 ? active.Max(frame => frame.StartedAt) : 0;
+        FrameReading[] current = active.Where(frame => latestStart - frame.StartedAt < 750).ToArray();
 
-        double[] times = active.Where(frame => frame.FrameType == "Application" && frame.FrameTime.HasValue).Select(frame => frame.FrameTime!.Value).ToArray();
+        FrameReading[] instrumented = current.Where(frame => frame.FrameType == "Application" && frame.Instrumented).ToArray();
+        bool useInstrumentedTiming = instrumented.Length >= 4 && instrumented.Length * 5 < current.Length * 4;
+        double[] times = useInstrumentedTiming ? InstrumentedIntervals(instrumented).Select(frame => frame.FrameTime!.Value).ToArray()
+            : current.Where(frame => frame.FrameType == "Application" && frame.FrameTime.HasValue).Select(frame => frame.FrameTime!.Value).ToArray();
 
-        double[] displayed = active.Where(frame => frame.DisplayedTime.HasValue).Select(frame => frame.DisplayedTime!.Value).ToArray();
+        double[] displayed = current.Where(frame => frame.DisplayedTime.HasValue).Select(frame => frame.DisplayedTime!.Value).ToArray();
 
         string[] generated = active.Select(frame => frame.FrameType).Where(type => type is not ("Application" or "NotSet" or "Unknown" or "Repeated")).Distinct().ToArray();
 
         string? chain = active.LastOrDefault()?.SwapChain;
 
         FrameReading[] history = frames.Where(frame => frame.SwapChain == chain && frame.FrameType == "Application" && frame.FrameTime.HasValue && now - frame.ReceivedAt < 30000).ToArray();
+        if (useInstrumentedTiming) history = InstrumentedIntervals(history.Where(frame => frame.Instrumented).ToArray());
 
         double[] historyTimes = history.Select(frame => frame.FrameTime!.Value).ToArray();
         double? frameTime = times.Length > 1 ? times.Average() : null;
@@ -181,6 +187,8 @@ public static class FrameMetrics
 
         {
 
+            HasGeneratedFrameTags = generated.Length > 0,
+            HasInstrumentedFrameTiming = useInstrumentedTiming,
             AverageFps = times.Length > 1 && historyTimes.Length > 1 ? 1000 / historyTimes.Average() : null,
 
             LowFps = times.Length > 1 && historyTimes.Length >= 100 ? 1000 / historyTimes.OrderDescending().Take((int)Math.Ceiling(historyTimes.Length * 0.01)).Average() : null,
@@ -191,6 +199,12 @@ public static class FrameMetrics
 
         };
 
+    }
+    private static FrameReading[] InstrumentedIntervals(FrameReading[] frames)
+    {
+        FrameReading[] ordered = frames.OrderBy(frame => frame.StartedAt).ToArray();
+        return ordered.Skip(1).Zip(ordered, (current, previous) => current with { FrameTime = current.StartedAt - previous.StartedAt })
+            .Where(frame => frame.FrameTime > 0).ToArray();
     }
 
     private static string TechnologyLabel(string frameType) => frameType == "AMD AFMF" ? "AFMF 2.1" : frameType + " reported";
@@ -258,7 +272,7 @@ public sealed class FrameCapture : IAsyncDisposable
 
         ProcessStartInfo start = StartInfo(executable);
 
-        foreach (string argument in new[] { "--output_stdout", "--no_console_stats", "--track_frame_type", "--v2_metrics", "--qpc_time_ms", "--session_name", session }) start.ArgumentList.Add(argument);
+        foreach (string argument in new[] { "--output_stdout", "--no_console_stats", "--track_frame_type", "--track_app_timing", "--track_pc_latency", "--v2_metrics", "--qpc_time_ms", "--session_name", session }) start.ArgumentList.Add(argument);
 
         lifetime = new CaptureJob();
         try

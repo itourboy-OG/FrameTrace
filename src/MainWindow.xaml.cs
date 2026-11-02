@@ -364,9 +364,10 @@ public partial class MainWindow : Window
                             pendingUpscalerStarted = now;
                             upscalerScanSlow = false;
                             nextUpscalerScan = now + 5000;
+                            int scanProcess = candidate.ProcessId;
                             pendingUpscalerScan = pendingCyberpunkSettings
-                                ? Task.Run(() => CyberpunkUpscalerDetection.Inspect(CyberpunkUpscalerDetection.SettingsPath))
-                                : Task.Run(() => GameUpscalerDetection.InspectLoadedModules(candidate.ProcessId));
+                                ? Task.Run(() => CyberpunkUpscalerDetection.Inspect(CyberpunkUpscalerDetection.SettingsPath) with { NvidiaOverrides = NvidiaOverrideDetection.Inspect(scanProcess) })
+                                : Task.Run(() => GameUpscalerDetection.InspectLoadedModules(scanProcess) with { NvidiaOverrides = NvidiaOverrideDetection.Inspect(scanProcess) });
                         }
 
                     }
@@ -377,7 +378,7 @@ public partial class MainWindow : Window
                     UpscalerObservation selectedUpscaler = candidate is null ? UpscalerObservation.Unknown : GameTechnologyChoices.Apply(upscaler, confirmed);
                     string generation = selectedUpscaler.FrameGenerationSetting is not { } gameSetting ? captured.Generation
                         : captured.Generation == "Unavailable" ? gameSetting : captured.Generation + " · " + gameSetting;
-                    summary = captured with { Upscaler = selectedUpscaler, Generation = generation };
+                    summary = captured with { Upscaler = selectedUpscaler, Generation = generation.Replace(" (saved setting)", "", StringComparison.Ordinal) };
 
                     if (summary.PresentMode != lastMode)
 
@@ -511,12 +512,21 @@ public partial class MainWindow : Window
             UpdateFanStatus();
             return; }
 
+        AppFpsCaption.Text = OverlayData.FpsLabel(summary).ToUpperInvariant();
+        DisplayFpsCaption.Text = OverlayData.DisplayFpsLabel(summary).ToUpperInvariant();
         AppFps.Text = summary.AppFps?.ToString("0") ?? "—"; DisplayFps.Text = summary.DisplayFps?.ToString("0") ?? "—";
 
         FrameTimeText.Text = Readings.Format(summary.FrameTime, "ms"); GenerationText.Text = "Frame generation · " + summary.Generation;
 
         PresentMode.Text = summary.PresentMode;
         UpscalerStatus.Text = "Upscaler · " + summary.Upscaler.Label;
+        NvidiaOverrides? overrides = summary.Upscaler.NvidiaOverrides;
+        NvidiaOverridesStatus.Text = "NVIDIA presets · " + string.Join(" · ", new[] {
+            overrides?.SuperResolutionPreset is { } sr ? "SR " + sr : null,
+            overrides?.FrameGenerationPreset is { } fg ? "FG " + fg : null,
+            overrides?.RayReconstructionPreset is { } rr ? "RR " + rr : null
+        }.Where(label => label is not null));
+        NvidiaOverridesStatus.Visibility = overrides?.HasPreset == true ? Visibility.Visible : Visibility.Collapsed;
 
         AverageFps.Text = summary.AverageFps?.ToString("0") ?? "—"; LowFps.Text = summary.LowFps?.ToString("0") ?? "—";
 
